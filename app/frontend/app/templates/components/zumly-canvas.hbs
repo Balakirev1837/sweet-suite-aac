@@ -1,0 +1,38 @@
+{{#if board}}
+  {{#if isGridLayout}}
+    <div class="zumly-canvas-grid" style={{gridStyle}}>
+      {{#each gridCells as |cell|}}
+        <div
+          class="zumly-canvas-cell {{if cell.isEmpty 'empty'}}"
+          role="gridcell"
+          data-row={{cell.row}}
+          data-col={{cell.col}}
+          {{action "cellSelected" cell}}
+        >
+          {{#if cell.button}}
+            <span class="zumly-canvas-cell-label">{{cell.button.label}}</span>
+          {{/if}}
+        </div>
+      {{/each}}
+    </div>
+  {{else}}
+    <div class="zumly-canvas-freeform">
+      {{#each gridCells as |cell|}}
+        {{#if cell.button}}
+          <div
+            class="zumly-canvas-item"
+            role="button"
+            aria-label={{cell.button.label}}
+            {{action "cellSelected" cell}}
+          >
+            <span class="zumly-canvas-item-label">{{cell.button.label}}</span>
+          </div>
+        {{/if}}
+      {{/each}}
+    </div>
+  {{/if}}
+{{else}}
+  <div class="zumly-canvas-empty" aria-label="No board loaded">
+    <span class="zumly-canvas-empty-text">No board data available</span>
+  </div>
+{{/if}}
