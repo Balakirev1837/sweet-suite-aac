@@ -32,3 +32,19 @@
 /lib/domains.json
 # Ignore master key for decrypting credentials and more.
 /config/master.key
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+
+# Python local TTS artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+venv/
+.venv/
+*.egg
+models/

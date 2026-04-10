@@ -1,0 +1,17 @@
+# SweetSuite AAC - Local TTS Dependencies
+# Python 3.12 recommended (conda env recommended, see docs/local_tts_setup.md)
+#
+# Core TTS inference engine using ONNX runtime for fast local inference.
+# sherpa-onnx provides the audio synthesis pipeline that consumes Qwen3-TTS model outputs.
+sherpa-onnx>=1.10.0
+
+# Qwen3-TTS model loading and generation API.
+# Provides the text-to-speech generation pipeline with custom voice cloning support.
+qwen-tts>=0.1.0
+
+# Additional dependencies for the local TTS FastAPI service
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+soundfile>=0.12.1

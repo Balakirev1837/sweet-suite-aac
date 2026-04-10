@@ -1,0 +1,10 @@
+# Optional dependencies for improved performance and GPU acceleration
+# Install with: pip install -r requirements-optional.txt
+
+# Flash Attention 2 - significantly reduces memory usage and speeds up inference
+# Requires a CUDA-compatible GPU with Ampere architecture or newer (compute capability >= 8.0)
+# and CUDA toolkit installed. Falls back to standard attention if unavailable.
+flash-attn>=2.5.0
+
+# GPU-accelerated ONNX runtime for faster inference on CUDA devices
+onnxruntime-gpu>=1.17.0
