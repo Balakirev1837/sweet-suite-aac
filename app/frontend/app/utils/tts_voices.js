@@ -1092,6 +1092,276 @@ var voices = EmberObject.extend({
       language_version: "1.288",
       voice_dir: "hqm-ref-USSpanish-Rosa-22khz"
     },
+
+    // -------------------------------------------------------------------------
+    // LLM Voices — SherpaTTS / Qwen3 (local, offline)
+    // These voices run entirely on-device. No internet required.
+    // Voice ID prefix: "sherpa:"
+    // -------------------------------------------------------------------------
+
+    // English (en-US) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:ryan", name: "Ryan",
+      locale: "en-US", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:vivian", name: "Vivian",
+      locale: "en-US", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:quinn", name: "Quinn",
+      locale: "en-US", gender: "neutral", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:alex_child", name: "Alex (Child)",
+      locale: "en-US", gender: "m", age: "child",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:ellie_child", name: "Ellie (Child)",
+      locale: "en-US", gender: "f", age: "child",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:jordan_child", name: "Jordan (Child)",
+      locale: "en-US", gender: "neutral", age: "child",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Chinese / Mandarin (zh-CN) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:chen", name: "Chen",
+      locale: "zh-CN", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:mei", name: "Mei",
+      locale: "zh-CN", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Japanese (ja-JP) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:yuki", name: "Yuki",
+      locale: "ja-JP", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:haru", name: "Haru",
+      locale: "ja-JP", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Korean (ko-KR) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:jimin", name: "Jimin",
+      locale: "ko-KR", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:tae", name: "Tae",
+      locale: "ko-KR", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // French (fr-FR) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:pierre", name: "Pierre",
+      locale: "fr-FR", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:camille_child", name: "Camille (Child)",
+      locale: "fr-FR", gender: "neutral", age: "child",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // German (de-DE) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:hans", name: "Hans",
+      locale: "de-DE", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:greta", name: "Greta",
+      locale: "de-DE", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Spanish (es-ES) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:carlos", name: "Carlos",
+      locale: "es-ES", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:luna", name: "Luna",
+      locale: "es-ES", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Portuguese (pt-BR) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:mateo", name: "Mateo",
+      locale: "pt-BR", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:isabella", name: "Isabella",
+      locale: "pt-BR", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Italian (it-IT) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:marco", name: "Marco",
+      locale: "it-IT", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:giulia", name: "Giulia",
+      locale: "it-IT", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // Russian (ru-RU) — SherpaTTS local voices
+    {
+      voice_id: "sherpa:ivan", name: "Ivan",
+      locale: "ru-RU", gender: "m", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+    {
+      voice_id: "sherpa:natasha", name: "Natasha",
+      locale: "ru-RU", gender: "f", age: "adult",
+      provider: "SherpaTTS", llm: true,
+      requires_internet: false,
+      voice_url: "llm:local"
+    },
+
+    // -------------------------------------------------------------------------
+    // LLM Voices — OpenAI TTS (cloud, requires internet)
+    // Voice ID prefix: "llm:openai:"
+    // -------------------------------------------------------------------------
+
+    {
+      voice_id: "llm:openai:alloy", name: "Alloy",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:ash", name: "Ash",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:ballad", name: "Ballad",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:coral", name: "Coral",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:echo", name: "Echo",
+      locale: "multi", gender: "m", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:fable", name: "Fable",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:onyx", name: "Onyx",
+      locale: "multi", gender: "m", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:nova", name: "Nova",
+      locale: "multi", gender: "f", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:sage", name: "Sage",
+      locale: "multi", gender: "neutral", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
+    {
+      voice_id: "llm:openai:shimmer", name: "Shimmer",
+      locale: "multi", gender: "f", age: "adult",
+      provider: "OpenAI", llm: true,
+      requires_internet: true,
+      voice_url: "llm:cloud"
+    },
   ]
 });
 window.acapela_versions = voices.get('versions');
