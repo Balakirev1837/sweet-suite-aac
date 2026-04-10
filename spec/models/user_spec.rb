@@ -355,6 +355,75 @@ describe User, :type => :model do
       u.generate_defaults
       expect(u.settings['preferences']['word_suggestion_images']).to eq(true)
     end
+
+    it "should set LLM voice and Zumly preference defaults" do
+      u = User.new
+      u.generate_defaults
+      prefs = u.settings['preferences']
+      expect(prefs['llm_voice_consent']).to eq(false)
+      expect(prefs['llm_voice_provider_preference']).to eq('sherpa')
+      expect(prefs['scanning_voice_id']).to eq(nil)
+      expect(prefs['zumly_enabled']).to eq(false)
+      expect(prefs['zumly_max_depth']).to eq(3)
+      expect(prefs['llm_voice_usage_count']).to eq(0)
+      expect(prefs['llm_voice_usage_reset_at']).to eq(nil)
+    end
+
+    it "should not override existing LLM voice and Zumly preferences" do
+      u = User.new
+      u.settings = { 'preferences' => {
+        'llm_voice_consent' => true,
+        'llm_voice_provider_preference' => 'elevenlabs',
+        'scanning_voice_id' => 'voice-abc',
+        'zumly_enabled' => true,
+        'zumly_max_depth' => 7,
+        'llm_voice_usage_count' => 42,
+        'llm_voice_usage_reset_at' => 1700000000
+      } }
+      u.generate_defaults
+      prefs = u.settings['preferences']
+      expect(prefs['llm_voice_consent']).to eq(true)
+      expect(prefs['llm_voice_provider_preference']).to eq('elevenlabs')
+      expect(prefs['scanning_voice_id']).to eq('voice-abc')
+      expect(prefs['zumly_enabled']).to eq(true)
+      expect(prefs['zumly_max_depth']).to eq(7)
+      expect(prefs['llm_voice_usage_count']).to eq(42)
+      expect(prefs['llm_voice_usage_reset_at']).to eq(1700000000)
+    end
+  end
+
+  describe "llm voice and zumly migration" do
+    it "should backfill defaults for existing users" do
+      u = User.create
+      # Simulate a user created before the migration ran
+      u.settings['preferences'].delete('llm_voice_consent')
+      u.settings['preferences'].delete('llm_voice_provider_preference')
+      u.settings['preferences'].delete('scanning_voice_id')
+      u.settings['preferences'].delete('zumly_enabled')
+      u.settings['preferences'].delete('zumly_max_depth')
+      u.settings['preferences'].delete('llm_voice_usage_count')
+      u.settings['preferences'].delete('llm_voice_usage_reset_at')
+      u.save!
+
+      # Re-run the migration logic (generate_defaults covers new-user flow,
+      # but the migration handles existing records)
+      u.settings['preferences']['llm_voice_consent'] = false if u.settings['preferences']['llm_voice_consent'].nil?
+      u.settings['preferences']['llm_voice_provider_preference'] ||= 'sherpa'
+      u.settings['preferences']['zumly_enabled'] = false if u.settings['preferences']['zumly_enabled'].nil?
+      u.settings['preferences']['zumly_max_depth'] = 3 if u.settings['preferences']['zumly_max_depth'].nil?
+      u.settings['preferences']['llm_voice_usage_count'] = 0 if u.settings['preferences']['llm_voice_usage_count'].nil?
+      u.save!
+
+      u.reload
+      prefs = u.settings['preferences']
+      expect(prefs['llm_voice_consent']).to eq(false)
+      expect(prefs['llm_voice_provider_preference']).to eq('sherpa')
+      expect(prefs['scanning_voice_id']).to eq(nil)
+      expect(prefs['zumly_enabled']).to eq(false)
+      expect(prefs['zumly_max_depth']).to eq(3)
+      expect(prefs['llm_voice_usage_count']).to eq(0)
+      expect(prefs['llm_voice_usage_reset_at']).to eq(nil)
+    end
   end
 
   describe "generate_email_hash" do

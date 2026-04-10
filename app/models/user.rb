@@ -480,6 +480,14 @@ class User < ActiveRecord::Base
     User.preference_defaults['authenticated_user'].each do |attr, val|
       self.settings['preferences'][attr] = val if self.settings['preferences'][attr] == nil
     end
+    # LLM voice and Zumly preference defaults
+    self.settings['preferences']['llm_voice_consent'] = false if self.settings['preferences']['llm_voice_consent'] == nil
+    self.settings['preferences']['llm_voice_provider_preference'] ||= 'sherpa'
+    # scanning_voice_id is nullable — no default needed
+    self.settings['preferences']['zumly_enabled'] = false if self.settings['preferences']['zumly_enabled'] == nil
+    self.settings['preferences']['zumly_max_depth'] = 3 if self.settings['preferences']['zumly_max_depth'] == nil
+    self.settings['preferences']['llm_voice_usage_count'] = 0 if self.settings['preferences']['llm_voice_usage_count'] == nil
+    # llm_voice_usage_reset_at is nullable — no default needed
     if self.settings['preferences']['role'] != 'communicator'
       self.settings['preferences'].delete('auto_open_speak_mode')
     end
