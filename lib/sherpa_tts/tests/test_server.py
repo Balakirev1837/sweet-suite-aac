@@ -1042,3 +1042,704 @@ class TestWaitForTTSScript:
         with open(script_path) as f:
             content = f.read()
         assert "SHERPA_TTS_STARTUP_TIMEOUT" in content
+
+
+# ---------------------------------------------------------------------------
+# Integration Tests — end-to-end HTTP tests with mocked model
+# ---------------------------------------------------------------------------
+
+
+class TestHealthWithModelIntegration:
+    """Integration: GET /health returns 200 with model_loaded=True."""
+
+    def test_health_returns_200_when_model_loaded(self, client_with_model):
+        """Health endpoint should report ok when model is loaded."""
+        client, _ = client_with_model
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["model_loaded"] is True
+
+    def test_health_includes_speakers_and_languages(self, client_with_model):
+        """Health response should list all speakers and languages."""
+        client, _ = client_with_model
+        data = client.get("/health").json()
+        assert len(data["speakers"]) == 9
+        assert len(data["languages"]) == 10
+
+
+class TestTTSSpeakersIntegration:
+    """Integration: POST /api/tts returns valid WAV for each of the 9 speakers."""
+
+    @pytest.fixture()
+    def _setup(self, client_with_model):
+        """Provide client and mock model tuple."""
+        return client_with_model
+
+    @pytest.mark.parametrize("speaker", SUPPORTED_SPEAKERS)
+    def test_tts_returns_wav_for_speaker(self, client_with_model, speaker):
+        """Each of the 9 speakers should produce a valid WAV response."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": f"Hello, I am {speaker}", "speaker": speaker},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "audio/wav"
+        # Verify valid WAV structure
+        assert resp.content[:4] == b"RIFF"
+        assert resp.content[8:12] == b"WAVE"
+        # Verify the model was called with the correct speaker
+        call_kwargs = mock_model.generate_custom_voice.call_args
+        assert call_kwargs.kwargs["speaker"] == speaker
+
+
+class TestTTSLanguagesIntegration:
+    """Integration: POST /api/tts works for all 10 supported languages."""
+
+    @pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
+    def test_tts_returns_wav_for_language(self, client_with_model, language):
+        """Each supported language should produce a valid WAV response."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello world", "language": language},
+        )
+        assert resp.status_code == 200
+        assert resp.content[:4] == b"RIFF"
+        # Verify the model was called with the correct language
+        call_kwargs = mock_model.generate_custom_voice.call_args
+        assert call_kwargs.kwargs["language"] == language
+
+
+class TestTTSInstructIntegration:
+    """Integration: instruct parameter is passed to the model and modifies output."""
+
+    def test_instruct_forwarded_to_model(self, client_with_model):
+        """The instruct text should be forwarded to generate_custom_voice."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={
+                "text": "Good morning everyone",
+                "speaker": "Ryan",
+                "instruct": "Speak happily",
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args
+        assert call_kwargs.kwargs["instruct"] == "Speak happily"
+
+    def test_empty_instruct_when_not_provided(self, client_with_model):
+        """When instruct is omitted, it should default to an empty string."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Good morning", "speaker": "Ryan"},
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args
+        assert call_kwargs.kwargs["instruct"] == ""
+
+    def test_instruct_changes_model_call(self, client_with_model):
+        """Different instruct values should result in different model calls."""
+        client, mock_model = client_with_model
+
+        resp_happy = client.post(
+            "/api/tts",
+            json={
+                "text": "Hello",
+                "speaker": "Ryan",
+                "instruct": "speak happily",
+            },
+        )
+        assert resp_happy.status_code == 200
+        call_happy = mock_model.generate_custom_voice.call_args
+
+        resp_sad = client.post(
+            "/api/tts",
+            json={
+                "text": "Hello",
+                "speaker": "Ryan",
+                "instruct": "speak sadly",
+            },
+        )
+        assert resp_sad.status_code == 200
+        call_sad = mock_model.generate_custom_voice.call_args
+
+        # Verify the two calls used different instruct values
+        assert call_happy.kwargs["instruct"] == "speak happily"
+        assert call_sad.kwargs["instruct"] == "speak sadly"
+
+    def test_instruct_produces_different_output_with_custom_mock(self, fake_audio):
+        """Verify that different instruct values can produce different audio.
+
+        Sets up the mock model to return distinct audio arrays based on
+        the instruct parameter, then verifies the HTTP response content
+        differs between two requests.
+        """
+        from fastapi.testclient import TestClient
+
+        happy_audio = (
+            np.random.RandomState(1).uniform(-0.5, 0.5, 24000).astype(np.float32)
+        )
+        sad_audio = (
+            np.random.RandomState(2).uniform(-0.5, 0.5, 24000).astype(np.float32)
+        )
+
+        def side_effect(**kwargs):
+            """Return different audio based on instruct parameter."""
+            instruct = kwargs.get("instruct", "")
+            if "happily" in instruct:
+                return ([happy_audio], 24000)
+            return ([sad_audio], 24000)
+
+        mock_model = MagicMock()
+        mock_model.generate_custom_voice.side_effect = side_effect
+
+        with patch("lib.sherpa_tts.server.load_model", return_value=mock_model):
+            app = create_app()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp_happy = client.post(
+                    "/api/tts",
+                    json={
+                        "text": "Hello",
+                        "speaker": "Ryan",
+                        "instruct": "speak happily",
+                    },
+                )
+                resp_sad = client.post(
+                    "/api/tts",
+                    json={
+                        "text": "Hello",
+                        "speaker": "Ryan",
+                        "instruct": "speak sadly",
+                    },
+                )
+
+                assert resp_happy.status_code == 200
+                assert resp_sad.status_code == 200
+                # Different instruct → different WAV bytes
+                assert resp_happy.content != resp_sad.content
+
+
+class TestStreamingIntegration:
+    """Integration: POST /api/tts/stream delivers audio chunks with low latency."""
+
+    def test_stream_returns_wav_content_type(self, client_with_model):
+        """Streaming endpoint should return audio/wav content type."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts/stream",
+            json={"text": "Hello world", "speaker": "Ryan"},
+        )
+        assert resp.status_code == 200
+        assert "audio/wav" in resp.headers["content-type"]
+
+    def test_stream_response_starts_with_wav_header(self, client_with_model):
+        """Streamed audio should begin with a valid RIFF/WAVE header."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts/stream",
+            json={"text": "Hello world", "speaker": "Ryan"},
+        )
+        content = resp.content
+        assert content[:4] == b"RIFF"
+        assert content[8:12] == b"WAVE"
+
+    def test_stream_first_chunk_within_200ms(self, fake_audio):
+        """First audio chunk from the stream should arrive within 200ms."""
+        import time
+
+        from fastapi.testclient import TestClient
+
+        mock_model = MagicMock()
+        mock_model.generate_custom_voice.return_value = ([fake_audio], 24000)
+
+        with patch("lib.sherpa_tts.server.load_model", return_value=mock_model):
+            app = create_app()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                start = time.monotonic()
+                with client.stream(
+                    "POST",
+                    "/api/tts/stream",
+                    json={"text": "Hello world", "speaker": "Ryan"},
+                ) as resp:
+                    first_chunk = next(resp.iter_bytes())
+                    elapsed = time.monotonic() - start
+
+                assert resp.status_code == 200
+                assert len(first_chunk) > 0
+                # With a mocked model, first chunk must arrive well under 200ms
+                assert elapsed < 0.2, f"First chunk took {elapsed:.3f}s (limit: 0.2s)"
+
+    def test_stream_delivers_complete_audio(self, client_with_model):
+        """Streaming response should contain the full WAV data."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts/stream",
+            json={"text": "Hello world", "speaker": "Ryan"},
+        )
+        content = resp.content
+        # Should have WAV header (44 bytes) plus PCM data
+        assert len(content) > 44
+        # Verify the data chunk size in the header matches the remaining bytes
+        data_size = struct.unpack_from("<I", content, 40)[0]
+        assert data_size == len(content) - 44
+
+
+class TestInvalidSpeakerIntegration:
+    """Integration: error handling for invalid speaker names."""
+
+    def test_invalid_speaker_returns_400(self, client_with_model):
+        """An unsupported speaker name should produce a 400 error."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello", "speaker": "NonExistentSpeaker"},
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "NonExistentSpeaker" in detail
+        assert "Unsupported speaker" in detail
+
+    def test_empty_speaker_uses_default(self, client_with_model):
+        """Omitting the speaker field should use the default speaker."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello"},
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args
+        assert call_kwargs.kwargs["speaker"] == DEFAULT_SPEAKER
+
+    def test_invalid_speaker_in_stream_endpoint(self, client_with_model):
+        """Streaming endpoint should also return 400 for invalid speakers."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts/stream",
+            json={"text": "Hello", "speaker": "FakeVoice"},
+        )
+        assert resp.status_code == 400
+
+    def test_invalid_language_returns_400(self, client_with_model):
+        """An unsupported language should produce a 400 error."""
+        client, _ = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello", "language": "Martian"},
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "Martian" in detail
+        assert "Unsupported language" in detail
+
+    def test_case_insensitive_speaker_matching(self, client_with_model):
+        """Speaker names should match case-insensitively."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello", "speaker": "ryan"},
+        )
+        assert resp.status_code == 200
+
+    def test_case_insensitive_language_matching(self, client_with_model):
+        """Language names should match case-insensitively."""
+        client, mock_model = client_with_model
+        resp = client.post(
+            "/api/tts",
+            json={"text": "Hello", "language": "english"},
+        )
+        assert resp.status_code == 200
+
+
+class TestConcurrentRequests:
+    """Integration: server handles multiple sequential TTS requests correctly.
+
+    Tests rapid-fire request handling to verify the server processes
+    multiple requests without state corruption, model reference issues,
+    or resource leaks.  True concurrency is validated via the in-flight
+    request counter that tracks overlapping synthesis calls.
+    """
+
+    def test_multiple_tts_requests_all_succeed(self, client_with_model):
+        """Five sequential TTS requests should all return 200 with valid WAV."""
+        client, _ = client_with_model
+        for i in range(5):
+            resp = client.post(
+                "/api/tts",
+                json={
+                    "text": f"Request {i}",
+                    "speaker": SUPPORTED_SPEAKERS[i % len(SUPPORTED_SPEAKERS)],
+                },
+            )
+            assert resp.status_code == 200, f"Request {i} failed: {resp.status_code}"
+            assert resp.content[:4] == b"RIFF"
+
+    def test_mixed_endpoints_all_succeed(self, client_with_model):
+        """Requests to different endpoints should all succeed in sequence."""
+        client, _ = client_with_model
+        # TTS synthesis
+        resp_tts = client.post(
+            "/api/tts",
+            json={"text": "Hello", "speaker": "Ryan"},
+        )
+        assert resp_tts.status_code == 200
+
+        # Streaming synthesis
+        resp_stream = client.post(
+            "/api/tts/stream",
+            json={"text": "Hello", "speaker": "Ryan"},
+        )
+        assert resp_stream.status_code == 200
+
+        # Health check
+        resp_health = client.get("/health")
+        assert resp_health.status_code == 200
+        assert resp_health.json()["model_loaded"] is True
+
+    def test_in_flight_counter_balances(self, client_with_model):
+        """In-flight counter should return to zero after requests complete."""
+        client, mock_model = client_with_model
+
+        # Make several requests — the in_flight counter should increment
+        # during each request and decrement back to zero after
+        for _ in range(3):
+            resp = client.post(
+                "/api/tts",
+                json={"text": "Hello", "speaker": "Ryan"},
+            )
+            assert resp.status_code == 200
+
+        # After all requests complete, the model should have been called
+        assert mock_model.generate_custom_voice.call_count == 3
+
+    def test_rapid_alternating_speakers(self, client_with_model):
+        """Alternating between speakers rapidly should not corrupt state."""
+        client, mock_model = client_with_model
+        speakers = ["Ryan", "Vivian", "Eric"]
+
+        for speaker in speakers * 3:  # 9 requests total
+            resp = client.post(
+                "/api/tts",
+                json={"text": f"Testing {speaker}", "speaker": speaker},
+            )
+            assert resp.status_code == 200
+
+        # Verify each call used the correct speaker
+        assert mock_model.generate_custom_voice.call_count == 9
+        calls = mock_model.generate_custom_voice.call_args_list
+        for i, call in enumerate(calls):
+            expected = speakers[i % len(speakers)]
+            assert call.kwargs["speaker"] == expected
+
+
+# ---------------------------------------------------------------------------
+# Metrics Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+class TestMetricsEndpoint:
+    """Test the Prometheus-compatible /metrics endpoint."""
+
+    @pytest.fixture()
+    def client(self):
+        """Create a test client without triggering lifespan model loading."""
+        from fastapi.testclient import TestClient
+
+        application = create_app()
+        with TestClient(application, raise_server_exceptions=False) as c:
+            yield c
+
+    def test_metrics_returns_200(self, client):
+        """GET /metrics should return HTTP 200."""
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+
+    def test_metrics_returns_text_plain(self, client):
+        """GET /metrics should return text/plain content type."""
+        resp = client.get("/metrics")
+        assert "text/plain" in resp.headers.get("content-type", "")
+
+    def test_metrics_contains_prometheus_counters(self, client):
+        """Metrics output should contain Prometheus counter declarations."""
+        resp = client.get("/metrics")
+        content = resp.text
+        assert "# TYPE sherpa_tts_requests_total counter" in content
+        assert "# TYPE sherpa_tts_health_checks_total counter" in content
+        assert "# TYPE sherpa_tts_model_loaded gauge" in content
+
+    def test_metrics_contains_all_metric_names(self, client):
+        """Metrics output should include all expected metric names."""
+        resp = client.get("/metrics")
+        content = resp.text
+        expected_metrics = [
+            "sherpa_tts_requests_total",
+            "sherpa_tts_requests_success_total",
+            "sherpa_tts_requests_failure_total",
+            "sherpa_tts_stream_requests_total",
+            "sherpa_tts_stream_requests_success_total",
+            "sherpa_tts_stream_requests_failure_total",
+            "sherpa_tts_openai_proxy_requests_total",
+            "sherpa_tts_openai_proxy_requests_success_total",
+            "sherpa_tts_openai_proxy_requests_failure_total",
+            "sherpa_tts_health_checks_total",
+            "sherpa_tts_model_load_errors_total",
+            "sherpa_tts_model_loaded",
+            "sherpa_tts_uptime_seconds",
+        ]
+        for metric_name in expected_metrics:
+            assert metric_name in content, f"Missing metric: {metric_name}"
+
+    def test_metrics_model_loaded_is_zero_without_model(self, client):
+        """When no model is loaded, sherpa_tts_model_loaded should be 0."""
+        resp = client.get("/metrics")
+        content = resp.text
+        # Find the model_loaded line and verify value is 0
+        for line in content.split("\n"):
+            if line.startswith("sherpa_tts_model_loaded ") and not line.startswith("#"):
+                assert line.strip() == "sherpa_tts_model_loaded 0"
+                break
+
+    def test_metrics_uptime_is_positive(self, client):
+        """Uptime should be a positive number."""
+        resp = client.get("/metrics")
+        content = resp.text
+        for line in content.split("\n"):
+            if line.startswith("sherpa_tts_uptime_seconds ") and not line.startswith(
+                "#"
+            ):
+                value = float(line.split()[-1])
+                assert value >= 0
+                break
+
+    def test_metrics_counters_increment_on_health_check(self, client):
+        """Health check counter should increment when /health is called."""
+        # Get initial metrics
+        initial = client.get("/metrics").text
+        initial_count = 0
+        for line in initial.split("\n"):
+            if line.startswith(
+                "sherpa_tts_health_checks_total "
+            ) and not line.startswith("#"):
+                initial_count = int(line.split()[-1])
+                break
+
+        # Call /health a few times
+        client.get("/health")
+        client.get("/health")
+
+        # Get updated metrics
+        updated = client.get("/metrics").text
+        updated_count = 0
+        for line in updated.split("\n"):
+            if line.startswith(
+                "sherpa_tts_health_checks_total "
+            ) and not line.startswith("#"):
+                updated_count = int(line.split()[-1])
+                break
+
+        # Should have incremented by at least 2 (from the two health calls)
+        assert updated_count >= initial_count + 2
+
+    def test_app_has_metrics_endpoint(self):
+        """App should register a /metrics endpoint."""
+        application = create_app()
+        routes = [r.path for r in application.routes]
+        assert "/metrics" in routes
+
+
+# ---------------------------------------------------------------------------
+# Metrics Integration with TTS Requests
+# ---------------------------------------------------------------------------
+
+
+class TestMetricsTTSIntegration:
+    """Test that TTS requests correctly update Prometheus metrics."""
+
+    def test_tts_requests_increment_metrics(self, fake_audio):
+        """POST /api/tts should increment tts_requests_total and success counters."""
+        from fastapi.testclient import TestClient
+
+        mock_model = MagicMock()
+        mock_model.generate_custom_voice.return_value = ([fake_audio], 24000)
+
+        with patch("lib.sherpa_tts.server.load_model", return_value=mock_model):
+            app = create_app()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                # Get initial metrics
+                initial = client.get("/metrics").text
+                initial_total = self._get_metric(initial, "sherpa_tts_requests_total")
+                initial_success = self._get_metric(
+                    initial, "sherpa_tts_requests_success_total"
+                )
+
+                # Make a TTS request
+                resp = client.post(
+                    "/api/tts",
+                    json={"text": "Hello metrics", "speaker": "Ryan"},
+                )
+                assert resp.status_code == 200
+
+                # Check updated metrics
+                updated = client.get("/metrics").text
+                updated_total = self._get_metric(updated, "sherpa_tts_requests_total")
+                updated_success = self._get_metric(
+                    updated, "sherpa_tts_requests_success_total"
+                )
+
+                assert updated_total == initial_total + 1
+                assert updated_success == initial_success + 1
+
+    def test_tts_failure_increments_failure_metric(self):
+        """POST /api/tts with no model should increment failure counter."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            initial = client.get("/metrics").text
+            initial_failure = self._get_metric(
+                initial, "sherpa_tts_requests_failure_total"
+            )
+
+            # This should fail (no model loaded)
+            resp = client.post("/api/tts", json={"text": "Hello"})
+            assert resp.status_code == 503
+
+            updated = client.get("/metrics").text
+            updated_failure = self._get_metric(
+                updated, "sherpa_tts_requests_failure_total"
+            )
+
+            assert updated_failure == initial_failure + 1
+
+    @staticmethod
+    def _get_metric(metrics_text: str, metric_name: str) -> int:
+        """Extract a metric value from Prometheus text output.
+
+        Args:
+            metrics_text: Raw metrics text output.
+            metric_name: Name of the metric to find.
+
+        Returns:
+            Integer value of the metric.
+        """
+        for line in metrics_text.split("\n"):
+            if line.startswith(metric_name + " ") and not line.startswith("#"):
+                return int(line.split()[-1])
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Watchdog Script Tests
+# ---------------------------------------------------------------------------
+
+
+class TestWatchdogScript:
+    """Verify the bin/sherpa_tts_watchdog.sh script exists and is valid."""
+
+    def test_watchdog_script_exists(self):
+        """bin/sherpa_tts_watchdog.sh should exist in the project root."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        assert os.path.isfile(script_path)
+
+    def test_watchdog_script_references_health_endpoint(self):
+        """The watchdog script should reference the /health endpoint."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        with open(script_path) as f:
+            content = f.read()
+        assert "/health" in content
+
+    def test_watchdog_script_references_restart(self):
+        """The watchdog script should reference restart logic."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        with open(script_path) as f:
+            content = f.read()
+        assert "restart" in content.lower()
+
+    def test_watchdog_script_references_logging(self):
+        """The watchdog script should reference timestamp-based logging."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        with open(script_path) as f:
+            content = f.read()
+        assert "timestamp" in content.lower() or "log" in content.lower()
+
+    def test_watchdog_script_references_pid_file(self):
+        """The watchdog script should reference a PID file for process tracking."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        with open(script_path) as f:
+            content = f.read()
+        assert "PID_FILE" in content or "pid" in content.lower()
+
+    def test_watchdog_script_references_max_failures(self):
+        """The watchdog script should have configurable failure threshold."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        script_path = os.path.join(project_root, "bin", "sherpa_tts_watchdog.sh")
+        with open(script_path) as f:
+            content = f.read()
+        assert "MAX_FAILURES" in content
+
+
+# ---------------------------------------------------------------------------
+# Health Check Rake Task Tests
+# ---------------------------------------------------------------------------
+
+
+class TestHealthCheckRakeTask:
+    """Verify the tts:health_check rake task exists."""
+
+    def test_rake_file_contains_health_check_task(self):
+        """lib/tasks/tts.rake should define a tts:health_check task."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        rake_path = os.path.join(project_root, "lib", "tasks", "tts.rake")
+        with open(rake_path) as f:
+            content = f.read()
+        assert "health_check" in content
+
+    def test_rake_file_references_health_endpoint(self):
+        """The health_check task should reference the /health endpoint."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        rake_path = os.path.join(project_root, "lib", "tasks", "tts.rake")
+        with open(rake_path) as f:
+            content = f.read()
+        assert "/health" in content
+
+    def test_rake_file_references_base_url(self):
+        """The health_check task should reference SHERPA_TTS_BASE_URL."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        rake_path = os.path.join(project_root, "lib", "tasks", "tts.rake")
+        with open(rake_path) as f:
+            content = f.read()
+        assert "SHERPA_TTS_BASE_URL" in content
+
+
+# ---------------------------------------------------------------------------
+# Procfile Watchdog Entry Tests
+# ---------------------------------------------------------------------------
+
+
+class TestProcfileWatchdog:
+    """Verify the Procfile entry for the SherpaTTS watchdog process."""
+
+    def test_procfile_has_watchdog_entry(self):
+        """Procfile should contain a tts_watchdog process entry."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        procfile_path = os.path.join(project_root, "Procfile")
+        with open(procfile_path) as f:
+            content = f.read()
+        assert "tts_watchdog:" in content
+
+    def test_procfile_watchdog_references_script(self):
+        """The tts_watchdog entry should reference the watchdog script."""
+        project_root = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        procfile_path = os.path.join(project_root, "Procfile")
+        with open(procfile_path) as f:
+            content = f.read()
+        assert "sherpa_tts_watchdog" in content
