@@ -1,0 +1,24 @@
+# SherpaTTS Local Inference Service Dependencies
+# Install with: pip install -r lib/sherpa_tts/requirements.txt
+#
+# Python 3.12 recommended
+
+# Core TTS model loading and generation
+qwen-tts>=0.1.0
+
+# FastAPI web framework for the HTTP API
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# Async HTTP client (used by the OpenAI TTS proxy endpoint)
+httpx>=0.27.0
+
+# Audio processing
+numpy>=1.26.0
+soundfile>=0.12.1
+
+# PyTorch (required by qwen-tts for model inference)
+torch>=2.1.0
+
+# Environment variable loading
+python-dotenv>=1.0.0

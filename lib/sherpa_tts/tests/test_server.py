@@ -724,3 +724,218 @@ class TestTokenAuth:
         with patch("lib.sherpa_tts.server.SHERPA_TTS_TOKEN", ""):
             resp = client.get("/api/languages")
             assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# OpenAI TTS Proxy Tests
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIProxyConstants:
+    """Test the OpenAI proxy configuration constants."""
+
+    def test_llm_voice_api_key_from_env(self):
+        """LLM_VOICE_API_KEY should be read from the environment."""
+        # It may be empty in test, but should be a string
+        assert isinstance(LLM_VOICE_API_KEY, str)
+
+    def test_llm_voice_api_url_default(self):
+        """LLM_VOICE_API_URL should default to OpenAI's API."""
+        assert isinstance(LLM_VOICE_API_URL, str)
+
+    def test_llm_voice_default_model(self):
+        """LLM_VOICE_DEFAULT_MODEL should default to tts-1."""
+        assert isinstance(LLM_VOICE_DEFAULT_MODEL, str)
+
+
+class TestOpenAITTSProxyRequest:
+    """Test the OpenAITTSProxyRequest Pydantic model."""
+
+    def test_valid_request(self):
+        """A valid request with all fields should parse correctly."""
+        req = OpenAITTSProxyRequest(
+            input="Hello world",
+            voice="nova",
+            model="tts-1-hd",
+            response_format="wav",
+            speed=1.5,
+        )
+        assert req.input == "Hello world"
+        assert req.voice == "nova"
+        assert req.model == "tts-1-hd"
+        assert req.response_format == "wav"
+        assert req.speed == 1.5
+
+    def test_minimal_request(self):
+        """A request with only input should use defaults."""
+        req = OpenAITTSProxyRequest(input="Hi")
+        assert req.input == "Hi"
+        assert req.voice == "alloy"
+        assert req.response_format == "mp3"
+        assert req.speed == 1.0
+
+    def test_empty_input_rejected(self):
+        """Empty input should be rejected."""
+        with pytest.raises(Exception):
+            OpenAITTSProxyRequest(input="")
+
+    def test_speed_too_low_rejected(self):
+        """Speed below 0.25 should be rejected."""
+        with pytest.raises(Exception):
+            OpenAITTSProxyRequest(input="Hi", speed=0.1)
+
+    def test_speed_too_high_rejected(self):
+        """Speed above 4.0 should be rejected."""
+        with pytest.raises(Exception):
+            OpenAITTSProxyRequest(input="Hi", speed=5.0)
+
+
+class TestOpenAIProxyEndpoint:
+    """Test the /api/tts/openai_proxy endpoint."""
+
+    @pytest.fixture()
+    def client(self):
+        """Create a test client without triggering lifespan model loading."""
+        from fastapi.testclient import TestClient
+
+        application = create_app()
+        with TestClient(application, raise_server_exceptions=False) as c:
+            yield c
+
+    def test_returns_503_when_api_key_not_configured(self, client):
+        """Proxy should return 503 when LLM_VOICE_API_KEY is not set."""
+        with patch("lib.sherpa_tts.server.LLM_VOICE_API_KEY", ""):
+            resp = client.post(
+                "/api/tts/openai_proxy",
+                json={"input": "Hello", "voice": "alloy"},
+            )
+            assert resp.status_code == 503
+            assert "LLM_VOICE_API_KEY" in resp.json()["detail"]
+
+    def test_forwards_to_openai_when_key_is_set(self, client):
+        """Proxy should forward the request to OpenAI and return audio."""
+        fake_audio = b"\xff\xfb\x90\x00" * 100  # fake MP3 data
+        with patch("lib.sherpa_tts.server.LLM_VOICE_API_KEY", "sk-testkey"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_client_cls:
+                # Build a mock async client
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_resp.content = fake_audio
+
+                mock_client_instance = MagicMock()
+                mock_client_instance.post = MagicMock(return_value=mock_resp)
+                mock_client_instance.__aenter__ = MagicMock(return_value=mock_resp)
+                mock_client_instance.__aexit__ = MagicMock(return_value=None)
+
+                # Make AsyncClient return an async context manager
+                async def _fake_post(*args, **kwargs):
+                    return mock_resp
+
+                mock_client_instance.post = _fake_post
+
+                class FakeAsyncContextManager:
+                    async def __aenter__(self):
+                        return self
+
+                    async def __aexit__(self, *args):
+                        pass
+
+                    async def post(self, *args, **kwargs):
+                        return mock_resp
+
+                mock_client_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/openai_proxy",
+                    json={"input": "Hello world", "voice": "nova"},
+                )
+                assert resp.status_code == 200
+                assert resp.content == fake_audio
+                assert "audio/mpeg" in resp.headers.get("content-type", "")
+
+    def test_returns_502_on_openai_error(self, client):
+        """Proxy should return 502 when OpenAI returns an error."""
+        with patch("lib.sherpa_tts.server.LLM_VOICE_API_KEY", "sk-testkey"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_client_cls:
+                mock_resp = MagicMock()
+                mock_resp.status_code = 401
+                mock_resp.text = "Invalid API key"
+
+                class FakeAsyncContextManager:
+                    async def __aenter__(self):
+                        return self
+
+                    async def __aexit__(self, *args):
+                        pass
+
+                    async def post(self, *args, **kwargs):
+                        return mock_resp
+
+                mock_client_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/openai_proxy",
+                    json={"input": "Hello", "voice": "alloy"},
+                )
+                assert resp.status_code == 502
+                assert "401" in resp.json()["detail"]
+
+    def test_blocked_without_token(self, client):
+        """Proxy endpoint should require token when SHERPA_TTS_TOKEN is set."""
+        with patch("lib.sherpa_tts.server.SHERPA_TTS_TOKEN", "secret123"):
+            resp = client.post(
+                "/api/tts/openai_proxy",
+                json={"input": "Hello"},
+            )
+            assert resp.status_code == 401
+
+    def test_accessible_with_valid_token(self, client):
+        """Proxy endpoint should allow access with valid token."""
+        with patch("lib.sherpa_tts.server.SHERPA_TTS_TOKEN", "secret123"):
+            with patch("lib.sherpa_tts.server.LLM_VOICE_API_KEY", ""):
+                resp = client.post(
+                    "/api/tts/openai_proxy",
+                    json={"input": "Hello"},
+                    headers={"X-SherpaTTS-Token": "secret123"},
+                )
+                # Should not be 401 (auth pass-through)
+                assert resp.status_code != 401
+
+    def test_missing_input_returns_422(self, client):
+        """Proxy should return 422 when input is missing."""
+        resp = client.post("/api/tts/openai_proxy", json={})
+        assert resp.status_code == 422
+
+    def test_wav_format_returns_wav_content_type(self, client):
+        """Proxy should return audio/wav content type for wav format."""
+        fake_audio = b"RIFF" + b"\x00" * 100
+        with patch("lib.sherpa_tts.server.LLM_VOICE_API_KEY", "sk-testkey"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_client_cls:
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_resp.content = fake_audio
+
+                class FakeAsyncContextManager:
+                    async def __aenter__(self):
+                        return self
+
+                    async def __aexit__(self, *args):
+                        pass
+
+                    async def post(self, *args, **kwargs):
+                        return mock_resp
+
+                mock_client_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/openai_proxy",
+                    json={"input": "Hello", "voice": "alloy", "response_format": "wav"},
+                )
+                assert resp.status_code == 200
+                assert "audio/wav" in resp.headers.get("content-type", "")
+
+    def test_app_has_openai_proxy_endpoint(self):
+        """App should register a /api/tts/openai_proxy endpoint."""
+        application = create_app()
+        routes = [r.path for r in application.routes]
+        assert "/api/tts/openai_proxy" in routes
