@@ -16,6 +16,7 @@ Environment Variables:
     SHERPA_TTS_TOKEN: Shared-secret for request authentication. When set,
         all endpoints except /health require an X-SherpaTTS-Token header
         that matches this value. Leave empty to disable auth.
+    SHERPA_TTS_STARTUP_TIMEOUT: Seconds to wait for model loading (default: 120).
 """
 
 __version__ = "0.1.0"

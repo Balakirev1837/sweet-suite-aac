@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# wait_for_tts — Startup health check for the SherpaTTS service.
+#
+# Polls the /health endpoint until the TTS model reports itself as loaded
+# ("model_loaded": true) or the timeout expires.  Designed to be chained
+# in the Procfile so the Rails app does not route TTS traffic before the
+# service is ready.
+#
+# Usage:
+#   bin/wait_for_tts [BASE_URL] [TIMEOUT_SECONDS]
+#
+# Environment:
+#   SHERPA_TTS_BASE_URL          - TTS service URL (default: http://localhost:5003)
+#   SHERPA_TTS_STARTUP_TIMEOUT   - Seconds to wait before giving up (default: 120)
+#
+# Exit codes:
+#   0 - Service is ready
+#   1 - Timed out or curl error
+
+set -euo pipefail
+
+BASE_URL="${1:-${SHERPA_TTS_BASE_URL:-http://localhost:5003}}"
+TIMEOUT="${2:-${SHERPA_TTS_STARTUP_TIMEOUT:-120}}"
+HEALTH_URL="${BASE_URL%/}/health"
+
+echo "[wait_for_tts] Polling ${HEALTH_URL} — timeout ${TIMEOUT}s"
+
+elapsed=0
+interval=2
+
+while [ "$elapsed" -lt "$TIMEOUT" ]; do
+    # curl: --silent --fail --max-time avoids noise and hangs
+    if payload=$(curl --silent --fail --max-time 5 "$HEALTH_URL" 2>/dev/null); then
+        # Python's json module outputs True/False; jq outputs true/false.
+        # Accept both by checking for a truthy model_loaded value.
+        status=$(echo "$payload" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print('ready' if data.get('model_loaded') else data.get('status', 'loading'))
+" 2>/dev/null || echo "unknown")
+
+        if [ "$status" = "ready" ]; then
+            echo "[wait_for_tts] SherpaTTS is ready (${elapsed}s elapsed)"
+            exit 0
+        fi
+        echo "[wait_for_tts] status=${status}, waiting… (${elapsed}s / ${TIMEOUT}s)"
+    else
+        echo "[wait_for_tts] connection refused, retrying… (${elapsed}s / ${TIMEOUT}s)"
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+done
+
+echo "[wait_for_tts] ERROR: SherpaTTS did not become ready within ${TIMEOUT}s" >&2
+exit 1

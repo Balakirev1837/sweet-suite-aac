@@ -31,13 +31,16 @@ Environment Variables:
                             the X-SherpaTTS-Token header to match this value.
                             When empty/unset, token auth is disabled (not
                             recommended for production).
+    SHERPA_TTS_STARTUP_TIMEOUT - Seconds to wait for model loading (default: 120).
 """
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
+import signal
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -110,6 +113,11 @@ DEFAULT_LANGUAGE = os.environ.get("SHERPA_TTS_DEFAULT_LANGUAGE", "English")
 # (except /health) must include an X-SherpaTTS-Token header that
 # exactly matches this value.  When unset/empty, auth is disabled.
 SHERPA_TTS_TOKEN = os.environ.get("SHERPA_TTS_TOKEN", "")
+
+# Startup timeout: how long (in seconds) to wait for the model to load
+# before considering the service unhealthy.  Large models (1.7B params)
+# can take over a minute to load from disk, especially on CPU.
+SHERPA_TTS_STARTUP_TIMEOUT = int(os.environ.get("SHERPA_TTS_STARTUP_TIMEOUT", "120"))
 
 # OpenAI TTS proxy configuration — the API key lives server-side only.
 LLM_VOICE_API_KEY = os.environ.get("LLM_VOICE_API_KEY", "")
@@ -396,31 +404,98 @@ def create_app():
     """Build and configure the FastAPI application with lifespan model loading.
 
     The model is loaded once during startup and reused for all requests.
-    Health checks reflect the model loading state.
+    Health checks reflect the model loading state.  The server tracks
+    in-flight TTS requests and will wait for them to complete before
+    shutting down when it receives SIGTERM or SIGINT.
 
     Returns:
         A configured FastAPI application instance.
     """
-    # Shared mutable state for the model reference
-    app_state = {"model": None, "device": None, "error": None}
+    # Shared mutable state for the model reference and shutdown coordination
+    app_state = {
+        "model": None,
+        "device": None,
+        "error": None,
+        "shutting_down": False,
+    }
+
+    # Counter for in-flight TTS synthesis requests so that graceful
+    # shutdown can wait until all active work is finished.
+    in_flight = {"count": 0, "done_event": None}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """Load the Qwen3-TTS model on startup, release on shutdown."""
+        """Load the Qwen3-TTS model on startup, release on shutdown.
+
+        Installs signal handlers for SIGTERM and SIGINT so that the
+        server can finish in-progress TTS requests before stopping.
+        """
+        # Create an asyncio event that gets set when in_flight reaches zero
+        loop = asyncio.get_running_loop()
+        done_event = asyncio.Event()
+        in_flight["done_event"] = done_event
+
+        def _signal_handler(signum: int, _frame) -> None:
+            """Handle SIGTERM/SIGINT by initiating graceful shutdown.
+
+            Sets the ``shutting_down`` flag so new requests are rejected
+            (503) and logs the shutdown initiation.  The lifespan will
+            then wait for in-flight requests to drain.
+
+            Args:
+                signum: The signal number received.
+                _frame: Current stack frame (unused).
+            """
+            sig_name = signal.Signals(signum).name
+            logger.info(
+                "Received %s — initiating graceful shutdown (in-flight requests: %d)",
+                sig_name,
+                in_flight["count"],
+            )
+            app_state["shutting_down"] = True
+
+        # Install signal handlers for graceful shutdown.
+        # This may fail when the event loop is not running in the main
+        # thread (e.g. during testing with TestClient), which is fine —
+        # graceful shutdown simply won't be available in that context.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _signal_handler, sig, None)
+            except (RuntimeError, ValueError):
+                logger.debug(
+                    "Could not install signal handler for %s "
+                    "(non-main-thread event loop)",
+                    sig.name,
+                )
+
         device = _resolve_device()
         app_state["device"] = device
         try:
             model_path = os.path.abspath(DEFAULT_MODEL_PATH)
             model = load_model(model_path, device)
             app_state["model"] = model
-            logger.info("SherpaTTS service ready on %s:%s", DEFAULT_HOST, DEFAULT_PORT)
+            logger.info(
+                "SherpaTTS service ready on %s:%s — "
+                "accepting TTS requests (startup_timeout=%ds)",
+                DEFAULT_HOST,
+                DEFAULT_PORT,
+                SHERPA_TTS_STARTUP_TIMEOUT,
+            )
         except Exception as exc:
             app_state["error"] = str(exc)
             logger.error("Failed to load Qwen3-TTS model: %s", exc)
         yield
-        # Cleanup on shutdown
+
+        # Drain in-flight requests before shutting down
+        if in_flight["count"] > 0:
+            logger.info(
+                "Waiting for %d in-flight TTS request(s) to complete…",
+                in_flight["count"],
+            )
+            await done_event.wait()
+
         app_state["model"] = None
-        logger.info("SherpaTTS service shut down")
+        logger.info("SherpaTTS service shut down gracefully")
 
     app = FastAPI(
         title="SherpaTTS - Local Qwen3-TTS Inference",
@@ -477,10 +552,13 @@ def create_app():
             StreamingResponse with audio/wav content type.
 
         Raises:
-            HTTPException 503: If the model is not loaded.
+            HTTPException 503: If the model is not loaded or server is shutting down.
             HTTPException 400: If speaker or language is invalid.
             HTTPException 500: If synthesis fails.
         """
+        if app_state.get("shutting_down"):
+            raise HTTPException(status_code=503, detail="Server is shutting down")
+
         model = app_state.get("model")
         if model is None:
             error = app_state.get("error")
@@ -501,6 +579,7 @@ def create_app():
                 detail=f"Unsupported language '{request.language}'. Supported: {SUPPORTED_LANGUAGES}",
             )
 
+        in_flight["count"] += 1
         try:
             start = time.monotonic()
             wavs, sample_rate = model.generate_custom_voice(
@@ -542,6 +621,10 @@ def create_app():
             raise HTTPException(
                 status_code=500, detail=f"Synthesis failed: {exc}"
             ) from exc
+        finally:
+            in_flight["count"] -= 1
+            if in_flight["count"] == 0 and in_flight["done_event"]:
+                in_flight["done_event"].set()
 
     # ------------------------------------------------------------------
     # Streaming TTS (Dual-Track hybrid streaming architecture)
@@ -563,10 +646,13 @@ def create_app():
             StreamingResponse with audio/wav content type and chunked transfer.
 
         Raises:
-            HTTPException 503: If the model is not loaded.
+            HTTPException 503: If the model is not loaded or server is shutting down.
             HTTPException 400: If speaker or language is invalid.
             HTTPException 500: If synthesis fails.
         """
+        if app_state.get("shutting_down"):
+            raise HTTPException(status_code=503, detail="Server is shutting down")
+
         model = app_state.get("model")
         if model is None:
             error = app_state.get("error")
@@ -586,6 +672,8 @@ def create_app():
                 status_code=400,
                 detail=f"Unsupported language '{request.language}'. Supported: {SUPPORTED_LANGUAGES}",
             )
+
+        in_flight["count"] += 1
 
         async def audio_stream_generator():
             """Generate audio and stream it in chunks with WAV header first.
@@ -649,6 +737,10 @@ def create_app():
                 # In a streaming response we can't send an HTTP error at this point,
                 # so we simply stop yielding chunks
                 return
+            finally:
+                in_flight["count"] -= 1
+                if in_flight["count"] == 0 and in_flight["done_event"]:
+                    in_flight["done_event"].set()
 
         return StreamingResponse(
             audio_stream_generator(),
