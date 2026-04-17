@@ -10,6 +10,7 @@ Endpoints:
     POST /api/tts               - Synthesize speech, returns WAV audio
     POST /api/tts/stream        - Synthesize speech with streaming chunks (Dual-Track)
     POST /api/tts/openai_proxy  - Proxy OpenAI TTS requests (keeps API key server-side)
+    POST /api/tts/gemini_proxy  - Proxy Gemini TTS requests (keeps API key server-side)
 
 Usage:
     python -m lib.sherpa_tts.server
@@ -32,6 +33,14 @@ Environment Variables:
                             When empty/unset, token auth is disabled (not
                             recommended for production).
     SHERPA_TTS_STARTUP_TIMEOUT - Seconds to wait for model loading (default: 120).
+    GEMINI_TTS_API_KEY         - Google AI API key for Gemini TTS.
+                                 When set, /api/tts/gemini_proxy forwards TTS
+                                 requests to Google's Gemini API without exposing
+                                 the key to the browser.
+    GEMINI_TTS_MODEL           - Gemini model name (default: gemini-2.5-flash-preview-tts).
+    GEMINI_TTS_API_URL         - Override base URL for the Gemini API
+                                 (default: https://generativelanguage.googleapis.com/v1beta).
+    SHERPA_TTS_STARTUP_TIMEOUT - Seconds to wait for model loading (default: 120).
 """
 
 from __future__ import annotations
@@ -51,7 +60,7 @@ import soundfile as sf
 import torch
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("sherpa_tts")
@@ -125,6 +134,28 @@ LLM_VOICE_API_URL = os.environ.get(
     "LLM_VOICE_API_URL", "https://api.openai.com/v1"
 ).rstrip("/")
 LLM_VOICE_DEFAULT_MODEL = os.environ.get("LLM_VOICE_DEFAULT_MODEL", "tts-1")
+
+# Gemini TTS proxy configuration — the API key lives server-side only.
+GEMINI_TTS_API_KEY = os.environ.get("GEMINI_TTS_API_KEY", "")
+GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+GEMINI_TTS_API_URL = os.environ.get(
+    "GEMINI_TTS_API_URL",
+    "https://generativelanguage.googleapis.com/v1beta",
+).rstrip("/")
+
+# Gemini TTS supported voices (prebuilt voices available in the Gemini API)
+GEMINI_SUPPORTED_VOICES: list[str] = sorted(
+    [
+        "Kore",
+        "Charon",
+        "Puck",
+        "Aoede",
+        "Leda",
+        "Orus",
+        "Zephyr",
+        "Fenrir",
+    ]
+)
 
 # Scheme used by OpenAPI docs and the dependency below.
 _token_header_scheme = APIKeyHeader(name="X-SherpaTTS-Token", auto_error=False)
@@ -229,6 +260,29 @@ class OpenAITTSProxyRequest(BaseModel):
     )
     speed: float = Field(
         default=1.0, ge=0.25, le=4.0, description="Speaking rate multiplier"
+    )
+
+
+class GeminiTTSProxyRequest(BaseModel):
+    """Request body for the /api/tts/gemini_proxy endpoint.
+
+    The browser sends these fields without any API key; the server
+    injects the key from the GEMINI_TTS_API_KEY environment variable
+    before forwarding the request to Google's Gemini TTS API.
+
+    Attributes:
+        input: Text to synthesize into speech.
+        voice: Gemini voice name (e.g. 'Kore', 'Puck', 'Aoede').
+        model: Gemini model name (default: gemini-2.5-flash-preview-tts).
+    """
+
+    input: str = Field(
+        ..., min_length=1, max_length=4096, description="Text to synthesize"
+    )
+    voice: str = Field(default="Kore", description="Gemini voice name")
+    model: str = Field(
+        default=GEMINI_TTS_MODEL,
+        description="Gemini TTS model name",
     )
 
 
@@ -396,6 +450,50 @@ def _audio_to_pcm_bytes(audio: np.ndarray) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Gemini Audio Extraction Helper
+# ---------------------------------------------------------------------------
+
+
+def _extract_gemini_audio(response_data: dict) -> bytes:
+    """Extract raw PCM audio bytes from a Gemini generateContent response.
+
+    The Gemini TTS API returns audio data as a base64-encoded string inside
+    the ``candidates[0].content.parts[0].inlineData.data`` field.
+
+    Args:
+        response_data: Parsed JSON response from the Gemini API.
+
+    Returns:
+        Raw audio bytes extracted from the response, or an empty bytes
+        object if no audio data is found.
+    """
+    import base64
+
+    try:
+        if not isinstance(response_data, dict):
+            return b""
+
+        candidates = response_data.get("candidates", [])
+        if not candidates:
+            return b""
+
+        parts = candidates[0].get("content", {}).get("parts", [])
+        if not parts:
+            return b""
+
+        # Look for inline data with audio mime type
+        for part in parts:
+            inline_data = part.get("inlineData", {})
+            mime_type = inline_data.get("mimeType", "")
+            if mime_type.startswith("audio/") and "data" in inline_data:
+                return base64.b64decode(inline_data["data"])
+
+        return b""
+    except (KeyError, IndexError, TypeError):
+        return b""
+
+
+# ---------------------------------------------------------------------------
 # Application Factory
 # ---------------------------------------------------------------------------
 
@@ -422,6 +520,28 @@ def create_app():
     # Counter for in-flight TTS synthesis requests so that graceful
     # shutdown can wait until all active work is finished.
     in_flight = {"count": 0, "done_event": None}
+
+    # Prometheus-compatible metrics counters. Updated atomically from
+    # async handlers so that /metrics can be scraped at any time without
+    # blocking. All counters are simple integers — no external library
+    # required.
+    metrics = {
+        "tts_requests_total": 0,
+        "tts_requests_success_total": 0,
+        "tts_requests_failure_total": 0,
+        "tts_stream_requests_total": 0,
+        "tts_stream_requests_success_total": 0,
+        "tts_stream_requests_failure_total": 0,
+        "openai_proxy_requests_total": 0,
+        "openai_proxy_requests_success_total": 0,
+        "openai_proxy_requests_failure_total": 0,
+        "gemini_proxy_requests_total": 0,
+        "gemini_proxy_requests_success_total": 0,
+        "gemini_proxy_requests_failure_total": 0,
+        "health_checks_total": 0,
+        "model_load_errors_total": 0,
+        "service_start_time_seconds": time.time(),
+    }
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -483,6 +603,7 @@ def create_app():
             )
         except Exception as exc:
             app_state["error"] = str(exc)
+            metrics["model_load_errors_total"] += 1
             logger.error("Failed to load Qwen3-TTS model: %s", exc)
         yield
 
@@ -513,6 +634,7 @@ def create_app():
 
         Returns model load state so callers can determine readiness.
         """
+        metrics["health_checks_total"] += 1
         model = app_state.get("model")
         error = app_state.get("error")
 
@@ -533,6 +655,85 @@ def create_app():
             languages=SUPPORTED_LANGUAGES,
             device=app_state.get("device", "unknown"),
         )
+
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def prometheus_metrics():
+        """Expose Prometheus-compatible metrics for production monitoring.
+
+        Returns a plain-text response in the Prometheus exposition format.
+        Each metric is a simple counter or gauge. No external Prometheus
+        client library is required.
+
+        Metrics exposed:
+            sherpa_tts_requests_total — Total TTS synthesis requests
+            sherpa_tts_requests_success_total — Successful synthesis requests
+            sherpa_tts_requests_failure_total — Failed synthesis requests
+            sherpa_tts_stream_requests_total — Total streaming TTS requests
+            sherpa_tts_stream_requests_success_total — Successful streams
+            sherpa_tts_stream_requests_failure_total — Failed streams
+            sherpa_tts_openai_proxy_requests_total — Total proxy requests
+            sherpa_tts_openai_proxy_requests_success_total — Successful proxies
+            sherpa_tts_openai_proxy_requests_failure_total — Failed proxies
+            sherpa_tts_health_checks_total — Total /health endpoint hits
+            sherpa_tts_model_load_errors_total — Model load failure count
+            sherpa_tts_model_loaded — 1 if model is loaded, 0 otherwise
+            sherpa_tts_uptime_seconds — Seconds since service start
+        """
+        model = app_state.get("model")
+        model_loaded_value = 1 if model is not None else 0
+        uptime = time.time() - metrics["service_start_time_seconds"]
+
+        lines = [
+            f"# HELP sherpa_tts_requests_total Total TTS synthesis requests",
+            f"# TYPE sherpa_tts_requests_total counter",
+            f"sherpa_tts_requests_total {metrics['tts_requests_total']}",
+            f"# HELP sherpa_tts_requests_success_total Successful TTS synthesis",
+            f"# TYPE sherpa_tts_requests_success_total counter",
+            f"sherpa_tts_requests_success_total {metrics['tts_requests_success_total']}",
+            f"# HELP sherpa_tts_requests_failure_total Failed TTS synthesis",
+            f"# TYPE sherpa_tts_requests_failure_total counter",
+            f"sherpa_tts_requests_failure_total {metrics['tts_requests_failure_total']}",
+            f"# HELP sherpa_tts_stream_requests_total Total streaming TTS requests",
+            f"# TYPE sherpa_tts_stream_requests_total counter",
+            f"sherpa_tts_stream_requests_total {metrics['tts_stream_requests_total']}",
+            f"# HELP sherpa_tts_stream_requests_success_total Successful streaming TTS",
+            f"# TYPE sherpa_tts_stream_requests_success_total counter",
+            f"sherpa_tts_stream_requests_success_total {metrics['tts_stream_requests_success_total']}",
+            f"# HELP sherpa_tts_stream_requests_failure_total Failed streaming TTS",
+            f"# TYPE sherpa_tts_stream_requests_failure_total counter",
+            f"sherpa_tts_stream_requests_failure_total {metrics['tts_stream_requests_failure_total']}",
+            f"# HELP sherpa_tts_openai_proxy_requests_total Total OpenAI proxy requests",
+            f"# TYPE sherpa_tts_openai_proxy_requests_total counter",
+            f"sherpa_tts_openai_proxy_requests_total {metrics['openai_proxy_requests_total']}",
+            f"# HELP sherpa_tts_openai_proxy_requests_success_total Successful OpenAI proxy",
+            f"# TYPE sherpa_tts_openai_proxy_requests_success_total counter",
+            f"sherpa_tts_openai_proxy_requests_success_total {metrics['openai_proxy_requests_success_total']}",
+            f"# HELP sherpa_tts_openai_proxy_requests_failure_total Failed OpenAI proxy",
+            f"# TYPE sherpa_tts_openai_proxy_requests_failure_total counter",
+            f"sherpa_tts_openai_proxy_requests_failure_total {metrics['openai_proxy_requests_failure_total']}",
+            f"# HELP sherpa_tts_gemini_proxy_requests_total Total Gemini proxy requests",
+            f"# TYPE sherpa_tts_gemini_proxy_requests_total counter",
+            f"sherpa_tts_gemini_proxy_requests_total {metrics['gemini_proxy_requests_total']}",
+            f"# HELP sherpa_tts_gemini_proxy_requests_success_total Successful Gemini proxy",
+            f"# TYPE sherpa_tts_gemini_proxy_requests_success_total counter",
+            f"sherpa_tts_gemini_proxy_requests_success_total {metrics['gemini_proxy_requests_success_total']}",
+            f"# HELP sherpa_tts_gemini_proxy_requests_failure_total Failed Gemini proxy",
+            f"# TYPE sherpa_tts_gemini_proxy_requests_failure_total counter",
+            f"sherpa_tts_gemini_proxy_requests_failure_total {metrics['gemini_proxy_requests_failure_total']}",
+            f"# HELP sherpa_tts_health_checks_total Total health check requests",
+            f"# TYPE sherpa_tts_health_checks_total counter",
+            f"sherpa_tts_health_checks_total {metrics['health_checks_total']}",
+            f"# HELP sherpa_tts_model_load_errors_total Model load failure count",
+            f"# TYPE sherpa_tts_model_load_errors_total counter",
+            f"sherpa_tts_model_load_errors_total {metrics['model_load_errors_total']}",
+            f"# HELP sherpa_tts_model_loaded Whether the model is loaded (1=yes, 0=no)",
+            f"# TYPE sherpa_tts_model_loaded gauge",
+            f"sherpa_tts_model_loaded {model_loaded_value}",
+            f"# HELP sherpa_tts_uptime_seconds Seconds since service started",
+            f"# TYPE sherpa_tts_uptime_seconds gauge",
+            f"sherpa_tts_uptime_seconds {uptime:.2f}",
+        ]
+        return "\n".join(lines) + "\n"
 
     # ------------------------------------------------------------------
     # TTS Synthesis
@@ -556,13 +757,16 @@ def create_app():
             HTTPException 400: If speaker or language is invalid.
             HTTPException 500: If synthesis fails.
         """
+        metrics["tts_requests_total"] += 1
         if app_state.get("shutting_down"):
+            metrics["tts_requests_failure_total"] += 1
             raise HTTPException(status_code=503, detail="Server is shutting down")
 
         model = app_state.get("model")
         if model is None:
             error = app_state.get("error")
             detail = f"Model not loaded: {error}" if error else "Model not loaded yet"
+            metrics["tts_requests_failure_total"] += 1
             raise HTTPException(status_code=503, detail=detail)
 
         # Validate speaker
@@ -604,6 +808,7 @@ def create_app():
                 )
 
             wav_bytes = _encode_wav(wavs[0], sample_rate)
+            metrics["tts_requests_success_total"] += 1
             return Response(
                 content=wav_bytes,
                 media_type="audio/wav",
@@ -615,8 +820,10 @@ def create_app():
             )
 
         except HTTPException:
+            metrics["tts_requests_failure_total"] += 1
             raise
         except Exception as exc:
+            metrics["tts_requests_failure_total"] += 1
             logger.error("TTS synthesis failed: %s", exc)
             raise HTTPException(
                 status_code=500, detail=f"Synthesis failed: {exc}"
@@ -650,13 +857,16 @@ def create_app():
             HTTPException 400: If speaker or language is invalid.
             HTTPException 500: If synthesis fails.
         """
+        metrics["tts_stream_requests_total"] += 1
         if app_state.get("shutting_down"):
+            metrics["tts_stream_requests_failure_total"] += 1
             raise HTTPException(status_code=503, detail="Server is shutting down")
 
         model = app_state.get("model")
         if model is None:
             error = app_state.get("error")
             detail = f"Model not loaded: {error}" if error else "Model not loaded yet"
+            metrics["tts_stream_requests_failure_total"] += 1
             raise HTTPException(status_code=503, detail=detail)
 
         # Validate speaker
@@ -731,8 +941,10 @@ def create_app():
                     total_time,
                     request.speaker,
                 )
+                metrics["tts_stream_requests_success_total"] += 1
 
             except Exception as exc:
+                metrics["tts_stream_requests_failure_total"] += 1
                 logger.error("Streaming synthesis failed: %s", exc)
                 # In a streaming response we can't send an HTTP error at this point,
                 # so we simply stop yielding chunks
@@ -797,7 +1009,9 @@ def create_app():
             HTTPException 502: If OpenAI returns an error.
             HTTPException 500: If the upstream request fails unexpectedly.
         """
+        metrics["openai_proxy_requests_total"] += 1
         if not LLM_VOICE_API_KEY:
+            metrics["openai_proxy_requests_failure_total"] += 1
             raise HTTPException(
                 status_code=503,
                 detail="OpenAI TTS proxy is not configured (LLM_VOICE_API_KEY not set)",
@@ -852,15 +1066,155 @@ def create_app():
                     request.response_format,
                 )
 
+                metrics["openai_proxy_requests_success_total"] += 1
                 return Response(content=resp.content, media_type=ct)
 
         except HTTPException:
+            metrics["openai_proxy_requests_failure_total"] += 1
             raise
         except Exception as exc:
+            metrics["openai_proxy_requests_failure_total"] += 1
             logger.error("OpenAI TTS proxy request failed: %s", exc)
             raise HTTPException(
                 status_code=500,
                 detail=f"OpenAI TTS proxy request failed: {exc}",
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Gemini TTS Proxy (keeps API key server-side)
+    # ------------------------------------------------------------------
+
+    @app.post("/api/tts/gemini_proxy", dependencies=[Depends(verify_token)])
+    async def gemini_tts_proxy(request: GeminiTTSProxyRequest):
+        """Proxy a TTS request to Google's Gemini API, using the server-side key.
+
+        The browser never sees the API key — it calls this endpoint and the
+        server forwards the request to Google's ``generateContent`` endpoint
+        with ``responseModalities: ["AUDIO"]`` and ``speechConfig`` using the
+        ``GEMINI_TTS_API_KEY`` environment variable.
+
+        Args:
+            request: GeminiTTSProxyRequest with synthesis parameters (no key).
+
+        Returns:
+            Response with the audio bytes from Gemini and the appropriate
+            Content-Type header.
+
+        Raises:
+            HTTPException 503: If GEMINI_TTS_API_KEY is not configured.
+            HTTPException 400: If the requested voice is not supported.
+            HTTPException 502: If Gemini returns an error.
+            HTTPException 500: If the upstream request fails unexpectedly.
+        """
+        metrics["gemini_proxy_requests_total"] += 1
+
+        if not GEMINI_TTS_API_KEY:
+            metrics["gemini_proxy_requests_failure_total"] += 1
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini TTS proxy is not configured (GEMINI_TTS_API_KEY not set)",
+            )
+
+        # Validate voice name (case-insensitive)
+        if request.voice not in [
+            v for v in GEMINI_SUPPORTED_VOICES
+        ] and request.voice.lower() not in [v.lower() for v in GEMINI_SUPPORTED_VOICES]:
+            metrics["gemini_proxy_requests_failure_total"] += 1
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported voice '{request.voice}'. "
+                    f"Supported: {GEMINI_SUPPORTED_VOICES}"
+                ),
+            )
+
+        # Resolve the actual voice name with correct casing
+        resolved_voice = request.voice
+        for v in GEMINI_SUPPORTED_VOICES:
+            if v.lower() == request.voice.lower():
+                resolved_voice = v
+                break
+
+        # Build the Gemini generateContent request payload
+        payload = {
+            "contents": [{"parts": [{"text": request.input}]}],
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": resolved_voice}
+                    }
+                },
+            },
+        }
+
+        upstream_url = (
+            f"{GEMINI_TTS_API_URL}/models/{request.model}:generateContent"
+            f"?key={GEMINI_TTS_API_KEY}"
+        )
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                start = time.monotonic()
+                resp = await client.post(upstream_url, json=payload, headers=headers)
+                elapsed = time.monotonic() - start
+
+                if resp.status_code != 200:
+                    logger.error(
+                        "Gemini TTS proxy upstream error: %d %s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    metrics["gemini_proxy_requests_failure_total"] += 1
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"Gemini API returned {resp.status_code}: {resp.text[:200]}"
+                        ),
+                    )
+
+                # Extract audio data from the Gemini response
+                response_data = resp.json()
+                audio_data = _extract_gemini_audio(response_data)
+
+                if not audio_data:
+                    metrics["gemini_proxy_requests_failure_total"] += 1
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Gemini API returned no audio data in response",
+                    )
+
+                logger.info(
+                    "Gemini TTS proxy: %.0f chars synthesized in %.2fs "
+                    "(voice=%s, model=%s)",
+                    len(request.input),
+                    elapsed,
+                    resolved_voice,
+                    request.model,
+                )
+
+                metrics["gemini_proxy_requests_success_total"] += 1
+                return Response(
+                    content=audio_data,
+                    media_type="audio/pcm;rate=24000",
+                    headers={
+                        "X-Voice": resolved_voice,
+                        "X-Model": request.model,
+                        "X-Sample-Rate": "24000",
+                    },
+                )
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            metrics["gemini_proxy_requests_failure_total"] += 1
+            logger.error("Gemini TTS proxy request failed: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gemini TTS proxy request failed: {exc}",
             ) from exc
 
     return app

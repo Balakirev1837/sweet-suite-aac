@@ -1743,3 +1743,529 @@ class TestProcfileWatchdog:
         with open(procfile_path) as f:
             content = f.read()
         assert "sherpa_tts_watchdog" in content
+
+
+# ---------------------------------------------------------------------------
+# Gemini TTS Proxy Tests
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiProxyConstants:
+    """Test the Gemini proxy configuration constants."""
+
+    def test_gemini_tts_api_key_from_env(self):
+        """GEMINI_TTS_API_KEY should be read from the environment."""
+        from lib.sherpa_tts.server import GEMINI_TTS_API_KEY
+
+        assert isinstance(GEMINI_TTS_API_KEY, str)
+
+    def test_gemini_tts_model_default(self):
+        """GEMINI_TTS_MODEL should have a valid default."""
+        from lib.sherpa_tts.server import GEMINI_TTS_MODEL
+
+        assert isinstance(GEMINI_TTS_MODEL, str)
+        assert "gemini" in GEMINI_TTS_MODEL.lower()
+
+    def test_gemini_tts_api_url_default(self):
+        """GEMINI_TTS_API_URL should default to Google's API."""
+        from lib.sherpa_tts.server import GEMINI_TTS_API_URL
+
+        assert isinstance(GEMINI_TTS_API_URL, str)
+        assert "generativelanguage.googleapis.com" in GEMINI_TTS_API_URL
+
+    def test_gemini_supported_voices(self):
+        """GEMINI_SUPPORTED_VOICES should list known Gemini voices."""
+        from lib.sherpa_tts.server import GEMINI_SUPPORTED_VOICES
+
+        assert isinstance(GEMINI_SUPPORTED_VOICES, list)
+        assert len(GEMINI_SUPPORTED_VOICES) == 8
+        assert "Kore" in GEMINI_SUPPORTED_VOICES
+        assert "Puck" in GEMINI_SUPPORTED_VOICES
+        assert "Aoede" in GEMINI_SUPPORTED_VOICES
+
+    def test_gemini_voices_are_sorted(self):
+        """Gemini voice list should be sorted alphabetically."""
+        from lib.sherpa_tts.server import GEMINI_SUPPORTED_VOICES
+
+        assert GEMINI_SUPPORTED_VOICES == sorted(GEMINI_SUPPORTED_VOICES)
+
+
+class TestGeminiTTSProxyRequest:
+    """Test the GeminiTTSProxyRequest Pydantic model."""
+
+    def test_valid_request(self):
+        """A valid request with all fields should parse correctly."""
+        from lib.sherpa_tts.server import GeminiTTSProxyRequest
+
+        req = GeminiTTSProxyRequest(
+            input="Hello world",
+            voice="Puck",
+            model="gemini-2.5-flash-preview-tts",
+        )
+        assert req.input == "Hello world"
+        assert req.voice == "Puck"
+        assert req.model == "gemini-2.5-flash-preview-tts"
+
+    def test_minimal_request(self):
+        """A request with only input should use defaults."""
+        from lib.sherpa_tts.server import GeminiTTSProxyRequest
+
+        req = GeminiTTSProxyRequest(input="Hi")
+        assert req.input == "Hi"
+        assert req.voice == "Kore"
+        assert "gemini" in req.model
+
+    def test_empty_input_rejected(self):
+        """Empty input should be rejected."""
+        from lib.sherpa_tts.server import GeminiTTSProxyRequest
+
+        with pytest.raises(Exception):
+            GeminiTTSProxyRequest(input="")
+
+    def test_defaults(self):
+        """Default voice should be Kore."""
+        from lib.sherpa_tts.server import GeminiTTSProxyRequest
+
+        req = GeminiTTSProxyRequest(input="Test")
+        assert req.voice == "Kore"
+
+
+class TestExtractGeminiAudio:
+    """Test the _extract_gemini_audio helper function."""
+
+    def test_extracts_audio_from_valid_response(self):
+        """Should extract base64-decoded audio from a valid Gemini response."""
+        import base64
+
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        audio_bytes = b"\x00\x01\x02\x03" * 100
+        encoded = base64.b64encode(audio_bytes).decode()
+
+        response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/pcm;rate=24000",
+                                    "data": encoded,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        result = _extract_gemini_audio(response)
+        assert result == audio_bytes
+
+    def test_returns_empty_for_no_candidates(self):
+        """Should return empty bytes when no candidates exist."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        result = _extract_gemini_audio({})
+        assert result == b""
+
+    def test_returns_empty_for_empty_candidates(self):
+        """Should return empty bytes when candidates list is empty."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        result = _extract_gemini_audio({"candidates": []})
+        assert result == b""
+
+    def test_returns_empty_for_no_parts(self):
+        """Should return empty bytes when no parts in content."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        result = _extract_gemini_audio({"candidates": [{"content": {"parts": []}}]})
+        assert result == b""
+
+    def test_returns_empty_for_no_inline_data(self):
+        """Should return empty bytes when inlineData is missing."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        result = _extract_gemini_audio(
+            {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
+        )
+        assert result == b""
+
+    def test_returns_empty_for_non_audio_mime(self):
+        """Should return empty bytes when mimeType is not audio."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        result = _extract_gemini_audio(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "inlineData": {
+                                        "mimeType": "text/plain",
+                                        "data": "abc",
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        assert result == b""
+
+    def test_handles_malformed_response_gracefully(self):
+        """Should return empty bytes for malformed responses without crashing."""
+        from lib.sherpa_tts.server import _extract_gemini_audio
+
+        # None input
+        assert _extract_gemini_audio(None) == b""
+        # String input
+        assert _extract_gemini_audio("not a dict") == b""
+
+
+class TestGeminiProxyEndpoint:
+    """Test the /api/tts/gemini_proxy endpoint."""
+
+    @pytest.fixture()
+    def client(self):
+        """Create a test client without triggering lifespan model loading."""
+        from fastapi.testclient import TestClient
+
+        application = create_app()
+        with TestClient(application, raise_server_exceptions=False) as c:
+            yield c
+
+    def test_app_has_gemini_proxy_endpoint(self):
+        """App should register a /api/tts/gemini_proxy endpoint."""
+        application = create_app()
+        routes = [r.path for r in application.routes]
+        assert "/api/tts/gemini_proxy" in routes
+
+    def test_returns_503_when_api_key_not_configured(self, client):
+        """Proxy should return 503 when GEMINI_TTS_API_KEY is not set."""
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", ""):
+            resp = client.post(
+                "/api/tts/gemini_proxy",
+                json={"input": "Hello", "voice": "Kore"},
+            )
+            assert resp.status_code == 503
+            assert "GEMINI_TTS_API_KEY" in resp.json()["detail"]
+
+    def test_returns_400_for_invalid_voice(self, client):
+        """Proxy should return 400 for unsupported voice names."""
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-key"):
+            resp = client.post(
+                "/api/tts/gemini_proxy",
+                json={"input": "Hello", "voice": "NonExistentVoice"},
+            )
+            assert resp.status_code == 400
+            assert "Unsupported voice" in resp.json()["detail"]
+
+    def test_forwards_to_gemini_and_returns_audio(self, client):
+        """Proxy should forward request to Gemini and return audio."""
+        import base64
+
+        fake_audio = b"\x00\x01\x02\x03" * 500
+        encoded_audio = base64.b64encode(fake_audio).decode()
+
+        gemini_response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/pcm;rate=24000",
+                                    "data": encoded_audio,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = gemini_response
+
+        class FakeAsyncContextManager:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return mock_resp
+
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-api-key"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello world", "voice": "Kore"},
+                )
+                assert resp.status_code == 200
+                assert resp.content == fake_audio
+                assert "audio/pcm" in resp.headers.get("content-type", "")
+
+    def test_returns_502_on_gemini_error(self, client):
+        """Proxy should return 502 when Gemini returns an error."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "Invalid request"
+
+        class FakeAsyncContextManager:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return mock_resp
+
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-api-key"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello", "voice": "Kore"},
+                )
+                assert resp.status_code == 502
+                assert "400" in resp.json()["detail"]
+
+    def test_returns_502_when_no_audio_in_response(self, client):
+        """Proxy should return 502 when Gemini returns no audio data."""
+        gemini_response = {"candidates": []}
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = gemini_response
+
+        class FakeAsyncContextManager:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return mock_resp
+
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-api-key"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello", "voice": "Kore"},
+                )
+                assert resp.status_code == 502
+                assert "no audio data" in resp.json()["detail"]
+
+    def test_blocked_without_token(self, client):
+        """Proxy endpoint should require token when SHERPA_TTS_TOKEN is set."""
+        with patch("lib.sherpa_tts.server.SHERPA_TTS_TOKEN", "secret123"):
+            resp = client.post(
+                "/api/tts/gemini_proxy",
+                json={"input": "Hello"},
+            )
+            assert resp.status_code == 401
+
+    def test_accessible_with_valid_token(self, client):
+        """Proxy endpoint should allow access with valid token."""
+        with patch("lib.sherpa_tts.server.SHERPA_TTS_TOKEN", "secret123"):
+            with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", ""):
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello"},
+                    headers={"X-SherpaTTS-Token": "secret123"},
+                )
+                # Should not be 401 (auth pass-through)
+                assert resp.status_code != 401
+
+    def test_missing_input_returns_422(self, client):
+        """Proxy should return 422 when input is missing."""
+        resp = client.post("/api/tts/gemini_proxy", json={})
+        assert resp.status_code == 422
+
+    def test_case_insensitive_voice_matching(self, client):
+        """Voice names should match case-insensitively."""
+        import base64
+
+        fake_audio = b"\x00\x01" * 200
+        encoded_audio = base64.b64encode(fake_audio).decode()
+
+        gemini_response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/pcm;rate=24000",
+                                    "data": encoded_audio,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = gemini_response
+
+        class FakeAsyncContextManager:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return mock_resp
+
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-api-key"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello", "voice": "puck"},
+                )
+                assert resp.status_code == 200
+
+    def test_includes_voice_header_in_response(self, client):
+        """Response should include X-Voice header with the resolved voice name."""
+        import base64
+
+        fake_audio = b"\x00\x01" * 200
+        encoded_audio = base64.b64encode(fake_audio).decode()
+
+        gemini_response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/pcm;rate=24000",
+                                    "data": encoded_audio,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = gemini_response
+
+        class FakeAsyncContextManager:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def post(self, *args, **kwargs):
+                return mock_resp
+
+        with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", "test-api-key"):
+            with patch("lib.sherpa_tts.server.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value = FakeAsyncContextManager()
+
+                resp = client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello", "voice": "Aoede"},
+                )
+                assert resp.status_code == 200
+                assert resp.headers.get("x-voice") == "Aoede"
+                assert resp.headers.get("x-sample-rate") == "24000"
+
+
+class TestGeminiProxyMetrics:
+    """Test that Gemini proxy requests update Prometheus metrics."""
+
+    def test_gemini_metrics_present(self):
+        """Metrics output should include Gemini proxy counters."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/metrics")
+            content = resp.text
+            assert "sherpa_tts_gemini_proxy_requests_total" in content
+            assert "sherpa_tts_gemini_proxy_requests_success_total" in content
+            assert "sherpa_tts_gemini_proxy_requests_failure_total" in content
+
+    def test_gemini_failure_increments_metrics(self):
+        """Failed Gemini proxy request should increment failure counter."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            initial = client.get("/metrics").text
+            initial_failure = self._get_metric(
+                initial, "sherpa_tts_gemini_proxy_requests_failure_total"
+            )
+
+            # Trigger a failure (no API key configured)
+            with patch("lib.sherpa_tts.server.GEMINI_TTS_API_KEY", ""):
+                client.post(
+                    "/api/tts/gemini_proxy",
+                    json={"input": "Hello"},
+                )
+
+            updated = client.get("/metrics").text
+            updated_failure = self._get_metric(
+                updated, "sherpa_tts_gemini_proxy_requests_failure_total"
+            )
+            assert updated_failure == initial_failure + 1
+
+    @staticmethod
+    def _get_metric(metrics_text: str, metric_name: str) -> int:
+        """Extract a metric value from Prometheus text output."""
+        for line in metrics_text.split("\n"):
+            if line.startswith(metric_name + " ") and not line.startswith("#"):
+                return int(line.split()[-1])
+        return 0
+
+
+class TestEnvExampleGemini:
+    """Verify that .env.example documents Gemini TTS configuration."""
+
+    @pytest.fixture()
+    def env_example(self):
+        """Read and return lines from .env.example."""
+        project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        )
+        path = os.path.join(project_root, ".env.example")
+        with open(path) as f:
+            return f.readlines()
+
+    def test_gemini_tts_api_key_present(self, env_example):
+        """GEMINI_TTS_API_KEY should be documented in .env.example."""
+        content = "".join(env_example)
+        assert "GEMINI_TTS_API_KEY" in content
+
+    def test_gemini_tts_model_present(self, env_example):
+        """GEMINI_TTS_MODEL should be documented in .env.example."""
+        content = "".join(env_example)
+        assert "GEMINI_TTS_MODEL" in content
+
+    def test_gemini_tts_api_url_present(self, env_example):
+        """GEMINI_TTS_API_URL should be documented in .env.example."""
+        content = "".join(env_example)
+        assert "GEMINI_TTS_API_URL" in content
