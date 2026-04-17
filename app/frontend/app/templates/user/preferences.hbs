@@ -1283,6 +1283,19 @@
         </div>
       </div>
     </div>
+    {{#if app_state.feature_flags.zumly_navigation}}
+      <div class="form-group">
+        <label for="zumly_navigation" class="col-sm-3 control-label">{{t "Zoom Navigation" key='zoom_navigation'}}</label>
+        <div class="col-sm-5">
+          <div class="checkbox big_checkbox">
+            <label>
+              {{input type="checkbox" checked=pending_preferences.zumly_navigation id="zumly_navigation"}}
+              {{t "Use Zoom Navigation" key='use_zoom_navigation'}}
+            </label>
+          </div>
+        </div>
+      </div>
+    {{/if}}
     <div class="form-group">
       <label for="disable_speak_options" class="col-sm-3 control-label">{{t "Speak Menu" key='speak_menu'}}</label>
       <div class="col-sm-5">
@@ -2001,6 +2014,128 @@
             </div>
           </div>
         {{/if}}
+      {{/if}}
+    {{/preference-box}}
+
+    {{#preference-box title="LLM Voice Options" glyph='glyphicon glyphicon-cog' title_key='llm_voice_options'}}
+      <span style='display: none;'>{{t "LLM Voice Options" key='llm_voice_options'}}</span>
+      <p class='text-info' style='margin-bottom: 15px;'>
+        {{t "Configure AI-powered voice synthesis using the local Qwen3-TTS engine. Works fully offline once the model is loaded." key='llm_voice_intro'}}
+      </p>
+
+      {{! ---- Consent Toggle ---- }}
+      <div class="form-group">
+        <label class="col-sm-3 control-label">{{t "Enable LLM Voices" key='enable_llm_voices'}}</label>
+        <div class="col-sm-5">
+          <div class="checkbox big_checkbox">
+            <label>
+              {{input type="checkbox" checked=pending_preferences.llm_voice_consent id="llm_voice_consent" aria-label="Enable LLM voice synthesis"}}
+              {{t "Allow AI-generated speech" key='allow_llm_speech'}}
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {{#if pending_preferences.llm_voice_consent}}
+        {{! ---- Provider Selection ---- }}
+        <div class="form-group">
+          <label for="llm_voice_provider" class="col-sm-3 control-label">{{t "Voice Provider" key='voice_provider'}}</label>
+          <div class="col-sm-5">
+            {{bound-select select_class="form-control" select_id="llm_voice_provider" content=llmVoiceProviderList selection=pending_preferences.llm_voice_provider_preference action=(action "change_llm_voice_provider")}}
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: -10px;">
+          <div class="col-sm-5 col-sm-offset-3">
+            <p class='text-muted' style='font-size: 12px;'>{{llmVoiceConsentExplanation}}</p>
+          </div>
+        </div>
+
+        {{#if llmVoiceIsCloudProvider}}
+          <div class="form-group">
+            <div class="col-sm-5 col-sm-offset-3">
+              <div class="alert alert-warning" role="alert">
+                {{t "Cloud TTS sends your text to a third-party API to generate speech. Your words will be processed by an external service." key='cloud_tts_warning'}}
+              </div>
+            </div>
+          </div>
+
+          {{#if showLlmVoiceSupervisorConsent}}
+            <div class="form-group">
+              <label class="col-sm-3 control-label">{{t "Supervisor Approval" key='supervisor_approval'}}</label>
+              <div class="col-sm-5">
+                <div class="checkbox big_checkbox">
+                  <label>
+                    {{input type="checkbox" checked=pending_preferences.supervisor_llm_voice_consent id="supervisor_llm_voice_consent" aria-label="Supervisor approval for cloud TTS"}}
+                    {{t "Supervisor has approved cloud voice usage" key='supervisor_approved_cloud'}}
+                  </label>
+                </div>
+              </div>
+            </div>
+          {{/if}}
+        {{/if}}
+
+        {{! ---- Default LLM Voice ---- }}
+        <div class="form-group">
+          <label for="default_llm_voice" class="col-sm-3 control-label">{{t "Default Voice" key='default_llm_voice'}}</label>
+          <div class="col-sm-5">
+            <select class="form-control" id="default_llm_voice" aria-label="Select default LLM voice" onchange={{action "set_default_llm_voice" value="target.value"}}>
+              <option value="">— {{t "Select a voice" key='select_a_voice'}} —</option>
+              {{#each llmVoiceList as |voice|}}
+                <option value={{voice.id}} selected={{is_equal pending_preferences.default_llm_voice voice.id}}>
+                  {{voice.name}} ({{voice.locale}}) — {{voice.gender}}
+                </option>
+              {{/each}}
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: -10px;">
+          <div class="col-sm-5 col-sm-offset-3">
+            <p class='text-muted' style='font-size: 12px;'>
+              {{t "Each voice can speak any of the 10 supported languages: English, Chinese, Japanese, Korean, German, French, Spanish, Portuguese, Italian, Russian." key='llm_voice_language_note'}}
+            </p>
+          </div>
+        </div>
+
+        {{#if pending_preferences.default_llm_voice}}
+          <div class="form-group">
+            <div class="col-sm-2 col-sm-offset-3">
+              <button class='btn btn-default' {{action "test_llm_voice"}} aria-label="Test the selected LLM voice">{{t "Test Voice" key='test_llm_voice'}}</button>
+            </div>
+          </div>
+        {{/if}}
+
+        {{! ---- Per-Language Voice Mapping ---- }}
+        <div class="form-group" style="margin-top: 10px;">
+          <label class="col-sm-3 control-label">{{t "Voice Per Language" key='voice_per_language'}}</label>
+          <div class="col-sm-7">
+            <p class='text-muted' style='font-size: 12px; margin-bottom: 10px;'>
+              {{t "Assign a different voice for each language. If none is set, the default voice above will be used." key='per_language_blurb'}}
+            </p>
+            {{#each llmSupportedLanguages as |lang|}}
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label class="col-sm-2 control-label" style="font-size: 13px;">{{lang.label}}</label>
+                <div class="col-sm-6">
+                  <select class="form-control" aria-label="Select voice for {{lang.label}}" onchange={{action "set_llm_voice_for_language" lang.code value="target.value"}}>
+                    <option value="">— {{t "Use Default" key='use_default_voice'}} —</option>
+                    {{#each llmVoiceList as |voice|}}
+                      <option value={{voice.id}} selected={{is_equal (get-lang-voice lang.code pending_preferences.llm_voice_language_map) voice.id}}>
+                        {{voice.name}} ({{voice.locale}})
+                      </option>
+                    {{/each}}
+                  </select>
+                </div>
+              </div>
+            {{/each}}
+          </div>
+        </div>
+      {{else}}
+        <div class="form-group">
+          <div class="col-sm-5 col-sm-offset-3">
+            <p class='text-muted'>
+              {{t "Enabling LLM voices allows the app to use AI-powered speech synthesis. Your text is processed locally and never leaves this server." key='llm_voice_consent_blurb'}}
+            </p>
+          </div>
+        </div>
       {{/if}}
     {{/preference-box}}
   {{/unless}}
