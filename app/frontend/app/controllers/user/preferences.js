@@ -15,6 +15,7 @@ import { observer } from '@ember/object';
 import { computed } from '@ember/object';
 import { htmlSafe } from '@ember/string';
 import editManager from '../../utils/edit_manager';
+import { llmVoiceConsentGate, llmVoiceProviders, llmVoiceLanguageMap, SHERPA_TTS_LANGUAGES } from '../../utils/llm_voice_provider';
 
 export default Controller.extend({
   setup: function() {
@@ -242,7 +243,11 @@ export default Controller.extend({
       {name: i18n.t('use_twemoji', "Emoji icons (authored by Twitter)"), id: 'twemoji'},
       {name: i18n.t('use_noun-project', "The Noun Project black outlines"), id: 'noun-project'},
       {name: i18n.t('use_arasaac', "ARASAAC free symbols"), id: 'arasaac'},
+      {name: i18n.t('use_mulberry', "Mulberry Symbols (open-source SVG)"), id: 'mulberry'},
+      {name: i18n.t('use_sclera', "Sclera Symbols (high-contrast B&W)"), id: 'sclera'},
+      {name: i18n.t('use_openmoji', "OpenMoji (open-source emoji)"), id: 'openmoji'},
       {name: i18n.t('use_tawasol', "Tawasol symbol library"), id: 'tawasol'},
+      {name: i18n.t('use_openclipart', "Openclipart (public domain clip-art)"), id: 'openclipart'},
     ];
     return list;
   }),
@@ -727,6 +732,86 @@ export default Controller.extend({
       _this.set('can_record_tags', false);
     });
   }),
+
+  // -------------------------------------------------------------------------
+  // LLM Voice Consent preferences
+  // -------------------------------------------------------------------------
+
+  /** List of available LLM voice provider choices for the settings UI */
+  llmVoiceProviderList: computed(function() {
+    return [
+      { name: i18n.t('llm_voice_sherpa', "SherpaTTS (local, no data leaves server)"), id: 'sherpa' },
+      { name: i18n.t('llm_voice_openai', "Cloud TTS (sends text to third-party API)"), id: 'openai' }
+    ];
+  }),
+
+  /** Human-readable explanation of what consent covers for the selected provider */
+  llmVoiceConsentExplanation: computed('pending_preferences.llm_voice_provider_preference', function() {
+    var providerId = this.get('pending_preferences.llm_voice_provider_preference') || 'sherpa';
+    return llmVoiceConsentGate.consentExplanation(providerId);
+  }),
+
+  /** Whether the chosen provider is a cloud provider (requires stricter consent) */
+  llmVoiceIsCloudProvider: computed('pending_preferences.llm_voice_provider_preference', function() {
+    var providerId = this.get('pending_preferences.llm_voice_provider_preference') || 'sherpa';
+    return !llmVoiceConsentGate.isLocalProvider(providerId);
+  }),
+
+  /** Whether this user has supervisors who need to approve LLM voice usage */
+  llmVoiceRequiresSupervisorApproval: computed('model.supervisor_user_ids', function() {
+    var ids = this.get('model.supervisor_user_ids');
+    return !!(ids && ids.length > 0);
+  }),
+
+  /** Show the supervisor consent toggle only for supervised users */
+  showLlmVoiceSupervisorConsent: computed(
+    'pending_preferences.llm_voice_consent',
+    'llmVoiceRequiresSupervisorApproval',
+    function() {
+      return this.get('pending_preferences.llm_voice_consent') && this.get('llmVoiceRequiresSupervisorApproval');
+    }
+  ),
+
+  /** List of LLM voices available from the current provider */
+  llmVoiceList: computed(function() {
+    var provider = llmVoiceProviders.getDefaultProvider();
+    if (!provider) { return []; }
+    // listVoices is async but we return a static snapshot for the template
+    var sherpaProvider = llmVoiceProviders.getProvider('sherpa');
+    if (sherpaProvider) {
+      // QWEN3_VOICES is a static list, so we can build from it synchronously
+      return [
+        { id: 'sherpa:vivian', name: 'Vivian', locale: 'en-US', gender: 'female' },
+        { id: 'sherpa:serena', name: 'Serena', locale: 'en-US', gender: 'female' },
+        { id: 'sherpa:ryan', name: 'Ryan', locale: 'en-US', gender: 'male' },
+        { id: 'sherpa:dylan', name: 'Dylan', locale: 'en-US', gender: 'male' },
+        { id: 'sherpa:aiden', name: 'Aiden', locale: 'en-US', gender: 'male' },
+        { id: 'sherpa:uncle_fu', name: 'Uncle Fu', locale: 'zh-CN', gender: 'male' },
+        { id: 'sherpa:ono_anna', name: 'Ono Anna', locale: 'ja-JP', gender: 'female' },
+        { id: 'sherpa:sohee', name: 'Sohee', locale: 'ko-KR', gender: 'female' },
+        { id: 'sherpa:eric', name: 'Eric', locale: 'de-DE', gender: 'male' },
+        { id: 'sherpa:pierre', name: 'Pierre', locale: 'fr-FR', gender: 'male' },
+        { id: 'sherpa:carlos', name: 'Carlos', locale: 'es-ES', gender: 'male' },
+        { id: 'sherpa:mateo', name: 'Mateo', locale: 'pt-BR', gender: 'male' },
+        { id: 'sherpa:marco', name: 'Marco', locale: 'it-IT', gender: 'male' },
+        { id: 'sherpa:ivan', name: 'Ivan', locale: 'ru-RU', gender: 'male' }
+      ];
+    }
+    return [];
+  }),
+
+  /** Human-friendly list of supported languages for per-language voice mapping */
+  llmSupportedLanguages: computed(function() {
+    var labels = {
+      'en': 'English', 'zh': 'Chinese', 'ja': 'Japanese', 'ko': 'Korean',
+      'de': 'German', 'fr': 'French', 'es': 'Spanish', 'pt': 'Portuguese',
+      'it': 'Italian', 'ru': 'Russian'
+    };
+    return SHERPA_TTS_LANGUAGES.map(function(code) {
+      return { code: code, label: labels[code] || code };
+    });
+  }),
+
   actions: {
     plus_minus: function(direction, attribute) {
       var default_value = 1.0;
@@ -1071,6 +1156,74 @@ export default Controller.extend({
         _this.set('add_sidebar_board_error', i18n.t('bad_sidebar_board_key', "Unrecogonized value, please enter a board key or action code"));
       }
 
+    },
+
+    // -----------------------------------------------------------------------
+    // LLM Voice Consent Actions
+    // -----------------------------------------------------------------------
+
+    /** Toggle the LLM voice consent flag on or off. */
+    toggle_llm_voice_consent: function() {
+      var current = this.get('pending_preferences.llm_voice_consent');
+      if (current) {
+        // Revoking consent — also clear supervisor approval and reset provider
+        this.set('pending_preferences.llm_voice_consent', false);
+        this.set('pending_preferences.supervisor_llm_voice_consent', false);
+        this.set('pending_preferences.llm_voice_provider_preference', 'sherpa');
+      } else {
+        this.set('pending_preferences.llm_voice_consent', true);
+      }
+    },
+
+    /** Toggle supervisor-level LLM voice approval (only meaningful for supervised users). */
+    toggle_supervisor_llm_voice_consent: function() {
+      var current = this.get('pending_preferences.supervisor_llm_voice_consent');
+      this.set('pending_preferences.supervisor_llm_voice_consent', !current);
+    },
+
+    /** Change the preferred LLM voice provider, resetting consent if switching away from local. */
+    change_llm_voice_provider: function(providerId) {
+      this.set('pending_preferences.llm_voice_provider_preference', providerId);
+      // If switching to a cloud provider and user doesn't have supervisor consent, warn
+      if (!llmVoiceConsentGate.isLocalProvider(providerId) && this.get('llmVoiceRequiresSupervisorApproval')) {
+        if (!this.get('pending_preferences.supervisor_llm_voice_consent')) {
+          this.set('llm_voice_cloud_consent_warning', true);
+        }
+      } else {
+        this.set('llm_voice_cloud_consent_warning', false);
+      }
+    },
+
+    /** Set the default LLM voice from the dropdown. */
+    set_default_llm_voice: function(voiceId) {
+      this.set('pending_preferences.default_llm_voice', voiceId || null);
+    },
+
+    /** Test the currently selected LLM voice by synthesizing a short phrase. */
+    test_llm_voice: function() {
+      var voiceId = this.get('pending_preferences.default_llm_voice');
+      if (!voiceId) { return; }
+      var prefs = this.get('pending_preferences');
+      var resolved = llmVoiceConsentGate.resolveProvider(prefs);
+      if (resolved.provider) {
+        resolved.provider.synthesizeWithFallback(
+          'Hello, this is my voice.',
+          voiceId,
+          { lang: 'en' }
+        ).then(function(audioUrl) {
+          var audio = new Audio(audioUrl);
+          audio.play();
+        }).catch(function(err) {
+          console.warn('LLM voice test failed:', err);
+        });
+      }
+    },
+
+    /** Set a per-language voice mapping. */
+    set_llm_voice_for_language: function(langCode, voiceId) {
+      var prefs = this.get('pending_preferences');
+      var updated = llmVoiceLanguageMap.setVoiceForLanguage(langCode, voiceId, prefs);
+      this.set('pending_preferences.llm_voice_language_map', updated.llm_voice_language_map);
     }
   }
 });
