@@ -293,5 +293,191 @@ describe('zumly-canvas', function() {
       expect(html).toMatch(/z-view-button/);
       expect(html).toMatch(/Minimal/);
     });
+
+    // --- Accessibility: tabindex, aria-expanded, zoom-me ---
+
+    it('should include tabindex on all buttons', function() {
+      var html = component._buildButtonHTML({ label: 'Test' });
+      expect(html).toMatch(/tabindex="-1"/);
+    });
+
+    it('should include aria-expanded="false" on folder buttons', function() {
+      var html = component._buildButtonHTML({
+        label: 'Folder',
+        load_board: { id: 'sub1' }
+      });
+      expect(html).toMatch(/aria-expanded="false"/);
+    });
+
+    it('should not include aria-expanded on non-folder buttons', function() {
+      var html = component._buildButtonHTML({ label: 'Talk' });
+      expect(html).toNotMatch(/aria-expanded/);
+    });
+
+    it('should add zoom-me class on folder buttons', function() {
+      var html = component._buildButtonHTML({
+        label: 'Folder',
+        load_board: { id: 'sub1' }
+      });
+      expect(html).toMatch(/zoom-me/);
+    });
+
+    it('should not add zoom-me class on non-folder buttons', function() {
+      var html = component._buildButtonHTML({ label: 'Talk' });
+      expect(html).toNotMatch(/zoom-me/);
+    });
+
+    it('should include data-to attribute on folder buttons', function() {
+      var html = component._buildButtonHTML({
+        label: 'Folder',
+        load_board: { id: 'sub1' }
+      });
+      expect(html).toMatch(/data-to="board-sub1"/);
+    });
+  });
+
+  // --- gridCells accessibility properties ---
+
+  describe('gridCells — accessibility', function() {
+    it('should mark folder cells with isFolder=true', function() {
+      var board = mockBoard({
+        rows: 1, cols: 2,
+        order: [['btn1', 'btn2']],
+        buttons: [
+          { id: 'btn1', label: 'Hello' },
+          { id: 'btn2', label: 'Folder', load_board: { id: 'sub1' } }
+        ]
+      });
+      component.set('board', board);
+      var cells = component.get('gridCells');
+      expect(cells[0].isFolder).toEqual(false);
+      expect(cells[1].isFolder).toEqual(true);
+    });
+
+    it('should mark the first non-empty cell with isFirst=true', function() {
+      var board = mockBoard({
+        rows: 1, cols: 3,
+        order: [[null, 'btn1', 'btn2']],
+        buttons: [
+          { id: 'btn1', label: 'Hello' },
+          { id: 'btn2', label: 'World' }
+        ]
+      });
+      component.set('board', board);
+      var cells = component.get('gridCells');
+      expect(cells[0].isFirst).toEqual(false);
+      expect(cells[0].isEmpty).toEqual(true);
+      expect(cells[1].isFirst).toEqual(true);
+      expect(cells[2].isFirst).toEqual(false);
+    });
+
+    it('should default _lastZoomTriggerElement to null', function() {
+      expect(component.get('_lastZoomTriggerElement')).toEqual(null);
+    });
+  });
+
+  // --- keyDown handler ---
+
+  describe('keyDown', function() {
+    it('should prevent default on arrow keys', function() {
+      var prevented = false;
+      var event = { key: 'ArrowRight', preventDefault: function() { prevented = true; } };
+      component.keyDown(event);
+      expect(prevented).toEqual(true);
+    });
+
+    it('should prevent default on Enter', function() {
+      var prevented = false;
+      var event = { key: 'Enter', preventDefault: function() { prevented = true; } };
+      component.keyDown(event);
+      expect(prevented).toEqual(true);
+    });
+
+    it('should prevent default on Space', function() {
+      var prevented = false;
+      var event = { key: ' ', preventDefault: function() { prevented = true; } };
+      component.keyDown(event);
+      expect(prevented).toEqual(true);
+    });
+  });
+
+  // --- willDestroyElement cleanup ---
+
+  describe('willDestroyElement — cleanup', function() {
+    it('should clear _lastZoomTriggerElement', function() {
+      component.set('_lastZoomTriggerElement', document.createElement('div'));
+      component.willDestroyElement();
+      expect(component.get('_lastZoomTriggerElement')).toEqual(null);
+    });
+  });
+
+  // --- cellSelected action ---
+
+  describe('cellSelected action', function() {
+    it('should do nothing when cell is null', function() {
+      expect(function() {
+        component.send('cellSelected', null);
+      }).toNotThrow();
+    });
+
+    it('should do nothing when cell is empty', function() {
+      expect(function() {
+        component.send('cellSelected', { isEmpty: true });
+      }).toNotThrow();
+    });
+
+    it('should trigger zoomIn for folder cells', function() {
+      var zoomTarget = null;
+      stub(zumlyManager, 'zoomIn', function(viewName) {
+        zoomTarget = viewName;
+        return Promise.resolve();
+      });
+      stub(zumlyManager, 'focusFirstButton', function() {});
+      stub(zumlyManager, 'updateAriaExpanded', function() {});
+      stub(zumlyManager, 'announceToScreenReader', function() {});
+
+      var cell = {
+        isEmpty: false,
+        isFolder: true,
+        button: {
+          label: 'Animals',
+          load_board: { id: 'animals-board' }
+        }
+      };
+      component.send('cellSelected', cell);
+
+      expect(zoomTarget).toEqual('board-animals-board');
+    });
+
+    it('should send onCellSelect action for non-folder cells', function() {
+      var receivedCell = null;
+      component.set('onCellSelect', 'cellTapped');
+      component.set('targetObject', {
+        cellTapped: function(cell) {
+          receivedCell = cell;
+        }
+      });
+
+      var cell = {
+        isEmpty: false,
+        isFolder: false,
+        button: { label: 'Hello' }
+      };
+      component.send('cellSelected', cell);
+
+      expect(receivedCell).toNotEqual(null);
+      expect(receivedCell.button.label).toEqual('Hello');
+    });
+
+    it('should not send onCellSelect when action is not set', function() {
+      var cell = {
+        isEmpty: false,
+        isFolder: false,
+        button: { label: 'Test' }
+      };
+      expect(function() {
+        component.send('cellSelected', cell);
+      }).toNotThrow();
+    });
   });
 });

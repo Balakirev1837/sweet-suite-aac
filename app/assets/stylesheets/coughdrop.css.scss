@@ -5867,3 +5867,418 @@ body:-ms-fullscreen {
 @media print {
   .hide_print { display: none; }
 }
+
+/* ==========================================================================
+   Zumly Zoom UI — AAC Application Styles
+   These styles complement the core Zumly framework CSS (zumly.css) by
+   styling the AAC-specific elements rendered by zumly-canvas and
+   zumly_manager.boardGridToZView: buttons, grid cells, labels, images,
+   folder indicators, and accessibility helpers.
+   Style: quirky, nerdy, nostalgic — big friendly buttons, chunky borders,
+   retro color palette, and satisfying hover/focus states.
+   ========================================================================== */
+
+/* --- Canvas container (wraps Zumly mount point) --- */
+.zumly-canvas-grid {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* --- Grid cells (each AAC button slot) --- */
+.zumly-canvas-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border: 3px solid rgba(80, 80, 120, 0.25);
+  border-radius: 12px;
+  background: #f8f6ff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s, box-shadow 0.15s;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  padding: 4px;
+}
+
+.zumly-canvas-cell:hover {
+  background: #eeeaff;
+  border-color: rgba(80, 80, 160, 0.45);
+  box-shadow: 0 2px 8px rgba(80, 80, 160, 0.15);
+}
+
+.zumly-canvas-cell:focus {
+  outline: 3px solid #6c5ce7;
+  outline-offset: 2px;
+  background: #e8e4ff;
+  box-shadow: 0 0 0 4px rgba(108, 92, 231, 0.25);
+}
+
+.zumly-canvas-cell:active {
+  transform: scale(0.96);
+}
+
+.zumly-canvas-cell.empty {
+  background: transparent;
+  border: 2px dashed rgba(80, 80, 120, 0.12);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* --- Cell labels (text below the button image) --- */
+.zumly-canvas-cell-label {
+  font-family: "ArchitectsDaughter", "Comic Sans MS", cursive, sans-serif;
+  font-size: 13px;
+  color: #3a3660;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- Freeform layout (for visual scene displays) --- */
+.zumly-canvas-freeform {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.zumly-canvas-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 64px;
+  border: 3px solid rgba(80, 80, 120, 0.25);
+  border-radius: 12px;
+  background: #f8f6ff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s, box-shadow 0.15s;
+  padding: 8px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.zumly-canvas-item:hover {
+  background: #eeeaff;
+  border-color: rgba(80, 80, 160, 0.45);
+  box-shadow: 0 2px 8px rgba(80, 80, 160, 0.15);
+}
+
+.zumly-canvas-item:focus {
+  outline: 3px solid #6c5ce7;
+  outline-offset: 2px;
+}
+
+.zumly-canvas-item-label {
+  font-family: "ArchitectsDaughter", "Comic Sans MS", cursive, sans-serif;
+  font-size: 14px;
+  color: #3a3660;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- Empty state (no board loaded) --- */
+.zumly-canvas-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+.zumly-canvas-empty-text {
+  font-family: "ArchitectsDaughter", "Comic Sans MS", cursive, sans-serif;
+  font-size: 18px;
+  color: #8888aa;
+  text-align: center;
+  padding: 20px;
+}
+
+/* ====================================================================
+   Z-View Button Styles (rendered by zumly_manager.boardGridToZView)
+   These style the buttons inside Zumly z-views — the actual AAC
+   communication buttons the user interacts with during zoom navigation.
+   ==================================================================== */
+
+/* --- Z-view grid structure --- */
+.z-view-row {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+.z-view-cell {
+  flex: 1 1 0;
+  min-height: 48px;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 3px;
+  box-sizing: border-box;
+}
+
+.z-view-cell.empty {
+  visibility: visible;
+  background: transparent;
+}
+
+/* --- Z-view button (the AAC communication button) --- */
+.z-view-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  border: 3px solid rgba(60, 60, 100, 0.2);
+  border-radius: 14px;
+  background: #faf8ff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  padding: 4px 6px;
+  text-decoration: none;
+}
+
+.z-view-button:hover {
+  background: #eeeaff;
+  border-color: rgba(80, 80, 160, 0.5);
+  box-shadow: 0 3px 12px rgba(80, 80, 160, 0.18);
+}
+
+.z-view-button:focus {
+  outline: 3px solid #6c5ce7;
+  outline-offset: 2px;
+  background: #e8e4ff;
+  box-shadow: 0 0 0 4px rgba(108, 92, 231, 0.3);
+}
+
+.z-view-button:active {
+  transform: scale(0.95);
+}
+
+/* Folder buttons (load a sub-board on click/zoom) — distinct visual style */
+.z-view-button.zoom-me {
+  border-style: dashed;
+  border-width: 3px;
+  border-color: rgba(108, 92, 231, 0.35);
+  background: linear-gradient(135deg, #faf8ff 0%, #f0edff 100%);
+}
+
+.z-view-button.zoom-me:hover {
+  border-color: rgba(108, 92, 231, 0.7);
+  background: linear-gradient(135deg, #f0edff 0%, #e0dbff 100%);
+  box-shadow: 0 4px 16px rgba(108, 92, 231, 0.2);
+}
+
+/* --- Button image (symbol/icon) --- */
+.z-view-button-image {
+  max-width: 80%;
+  max-height: 56px;
+  object-fit: contain;
+  pointer-events: none;
+  image-rendering: auto;
+  flex-shrink: 0;
+}
+
+/* --- Button label (word/phrase) --- */
+.z-view-button-label {
+  font-family: "ArchitectsDaughter", "Comic Sans MS", cursive, sans-serif;
+  font-size: 13px;
+  color: #3a3660;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: 2px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* --- Folder corner flag (▾ indicator for sub-board buttons) --- */
+.z-view-folder-flag {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 11px;
+  color: rgba(108, 92, 231, 0.6);
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* --- Hidden button revealed in Babble / show-all mode --- */
+.z-view-hidden-revealed {
+  opacity: 0.55;
+  border-style: dotted;
+  border-width: 2px;
+  border-color: rgba(180, 60, 60, 0.4);
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(180, 60, 60, 0.06) 4px,
+    rgba(180, 60, 60, 0.06) 8px
+  );
+}
+
+.z-view-hidden-revealed:hover {
+  opacity: 0.8;
+}
+
+/* --- Hidden slot (invisible cell that preserves grid position) --- */
+.z-view-cell.hidden-button-slot {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* --- ARIA live region (screen reader announcements) --- */
+.zumly-aria-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* --- Z-view freeform layout --- */
+.z-view.freeform {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.z-view-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 64px;
+  border: 3px solid rgba(80, 80, 120, 0.25);
+  border-radius: 12px;
+  background: #f8f6ff;
+  cursor: pointer;
+  padding: 8px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+/* ====================================================================
+   High-contrast mode support for Zumly UI
+   Boosts visibility for users who need extra visual clarity.
+   ==================================================================== */
+
+.color_black .zumly-canvas-cell {
+  background: rgba(40, 40, 60, 0.9);
+  border-color: rgba(200, 200, 255, 0.3);
+}
+
+.color_black .zumly-canvas-cell:hover {
+  background: rgba(60, 60, 100, 0.9);
+  border-color: rgba(200, 200, 255, 0.6);
+}
+
+.color_black .zumly-canvas-cell-label {
+  color: #e0dfff;
+}
+
+.color_black .z-view-button {
+  background: rgba(40, 40, 60, 0.9);
+  border-color: rgba(200, 200, 255, 0.3);
+}
+
+.color_black .z-view-button:hover {
+  background: rgba(60, 60, 100, 0.9);
+  border-color: rgba(200, 200, 255, 0.6);
+}
+
+.color_black .z-view-button-label {
+  color: #e0dfff;
+}
+
+.color_black .z-view-button.zoom-me {
+  border-color: rgba(160, 140, 255, 0.5);
+  background: linear-gradient(135deg, rgba(40, 40, 80, 0.9), rgba(60, 50, 100, 0.9));
+}
+
+.color_black .z-view-folder-flag {
+  color: rgba(180, 160, 255, 0.7);
+}
+
+/* ====================================================================
+   Responsive adjustments for Zumly UI
+   ==================================================================== */
+
+@media (max-width: 600px) {
+  .z-view-button {
+    border-radius: 10px;
+    padding: 3px 4px;
+    min-height: 40px;
+  }
+
+  .z-view-button-label {
+    font-size: 11px;
+  }
+
+  .z-view-button-image {
+    max-height: 40px;
+  }
+
+  .z-view-cell {
+    padding: 2px;
+    min-height: 40px;
+  }
+
+  .zumly-canvas-cell {
+    border-radius: 10px;
+    min-height: 40px;
+  }
+
+  .zumly-canvas-cell-label {
+    font-size: 11px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .z-view-button {
+    border-radius: 16px;
+    padding: 6px 8px;
+  }
+
+  .z-view-button-label {
+    font-size: 15px;
+  }
+
+  .z-view-button-image {
+    max-height: 72px;
+  }
+}
