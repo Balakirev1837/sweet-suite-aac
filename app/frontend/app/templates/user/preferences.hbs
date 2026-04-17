@@ -1308,6 +1308,61 @@
       </div>
     </div>
   {{/preference-box}}
+
+  {{#if app_state.feature_flags.zumly_navigation}}
+    {{#preference-box title="Zoom Settings" glyph='glyphicon glyphicon-zoom-in' title_key='zoom_settings'}}
+      <span style='display: none;'>{{t "Zoom Settings" key='zoom_settings'}}</span>
+      <p class='text-info' style='margin-bottom: 15px;'>
+        {{t "Configure how the Zumly zoom navigation behaves — magnification level, animation style, and how you trigger zooming. Think of it like tuning your own personal magnifying glass from the future." key='zoom_settings_intro'}}
+      </p>
+
+      <div class="form-group">
+        <label for="zoom_level" class="col-sm-3 control-label">{{t "Zoom Level" key='zoom_level'}}</label>
+        <div class="col-sm-5">
+          {{bound-select select_class="form-control" select_id="zoom_level" content=zoomLevelList selection=pending_preferences.zoom_settings.zoom_level action=(action (mut pending_preferences.zoom_settings.zoom_level)) }}
+          <span class='help-block' style='font-size: 12px;'>{{t "How much the board magnifies when you zoom into a folder button. 'Default' lets Zumly figure it out automatically." key='zoom_level_hint'}}</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="zoom_animation_speed" class="col-sm-3 control-label">{{t "Animation Speed" key='zoom_animation_speed'}}</label>
+        <div class="col-sm-5">
+          {{bound-select select_class="form-control" select_id="zoom_animation_speed" content=zoomAnimationSpeedList selection=pending_preferences.zoom_settings.animation_speed action=(action (mut pending_preferences.zoom_settings.animation_speed)) }}
+          <span class='help-block' style='font-size: 12px;'>{{t "How quickly the zoom transition happens. 'None' is instant — for those who like their zoom served at warp speed." key='zoom_speed_hint'}}</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="zoom_trigger_method" class="col-sm-3 control-label">{{t "Trigger Method" key='zoom_trigger_method'}}</label>
+        <div class="col-sm-5">
+          {{bound-select select_class="form-control" select_id="zoom_trigger_method" content=zoomTriggerMethodList selection=pending_preferences.zoom_settings.trigger_method action=(action (mut pending_preferences.zoom_settings.trigger_method)) }}
+          <span class='help-block' style='font-size: 12px;'>{{t "How you activate the zoom. Tap is the classic, long-press is for the patient, and double-tap is for the enthusiastic." key='zoom_trigger_hint'}}</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="auto_zoom_timeout" class="col-sm-3 control-label">{{t "Auto-Zoom Timeout" key='auto_zoom_timeout'}}</label>
+        <div class="col-sm-3">
+          <div class="input-group">
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "minus" "pending_preferences.zoom_settings.auto_zoom_timeout"}}>-</button>
+            </span>
+            {{input value=pending_preferences.zoom_settings.auto_zoom_timeout class="form-control" id="auto_zoom_timeout" placeholder="0"}}
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "plus" "pending_preferences.zoom_settings.auto_zoom_timeout"}}>+</button>
+            </span>
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <p class="form-control-static">{{t "milliseconds (0 = disabled)" key='zoom_timeout_ms'}}</p>
+        </div>
+        <div class="col-sm-5 col-sm-offset-3">
+          <span class='help-block' style='font-size: 12px;'>{{t "Automatically zoom into a button after hovering or dwelling on it for this many milliseconds. Set to 0 to disable auto-zoom entirely." key='auto_zoom_timeout_hint'}}</span>
+        </div>
+      </div>
+    {{/preference-box}}
+  {{/if}}
+
   {{#if advanced}}
     {{#preference-box title="Scanning Settings" glyph='glyphicon glyphicon-menu-hamburger' title_key='scanning_settings'}}
       <span style='display: none;'>{{t "Scanning Settings" key='scanning_settings'}}</span>

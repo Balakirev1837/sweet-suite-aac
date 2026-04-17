@@ -25,6 +25,7 @@ export default Controller.extend({
     this.set('phrase_categories_string', (this.get('pending_preferences.phrase_categories') || []).join(', '));
     this.set('advanced', true);
     this.set('skip_save_on_transition', false);
+    this.initZoomSettings();
     var _this = this;
     setTimeout(function() {
       if(window.weblinger) {
@@ -93,6 +94,69 @@ export default Controller.extend({
     {name: i18n.t('highlight_all', "Highlight All Buttons on Selection"), id: "all"},
     {name: i18n.t('highlight_spoken', "Highlight Spoken Buttons on Selection"), id: "spoken"},
   ],
+  // -------------------------------------------------------------------------
+  // Zoom Settings — user-facing options for Zumly zoom navigation
+  // Stored under preferences.zoom_settings as an object with keys:
+  //   zoom_level, animation_speed, trigger_method, auto_zoom_timeout
+  // -------------------------------------------------------------------------
+
+  /**
+   * Available zoom magnification level presets.
+   * "Default" uses the Zumly library's built-in scale calculation.
+   * @type {Array<{name: string, id: string}>}
+   */
+  zoomLevelList: [
+    {name: i18n.t('zoom_level_default', "Default (auto-calculated)"), id: "default"},
+    {name: i18n.t('zoom_level_low', "Low (subtle zoom)"), id: "low"},
+    {name: i18n.t('zoom_level_medium', "Medium (balanced zoom)"), id: "medium"},
+    {name: i18n.t('zoom_level_high', "High (maximum zoom)"), id: "high"}
+  ],
+
+  /**
+   * Available animation speed presets that map to Zumly transition durations.
+   * @type {Array<{name: string, id: string}>}
+   */
+  zoomAnimationSpeedList: [
+    {name: i18n.t('zoom_speed_fast', "Fast (200ms)"), id: "fast"},
+    {name: i18n.t('zoom_speed_normal', "Normal (600ms)"), id: "normal"},
+    {name: i18n.t('zoom_speed_slow', "Slow (1000ms)"), id: "slow"},
+    {name: i18n.t('zoom_speed_none', "None (instant)"), id: "none"}
+  ],
+
+  /**
+   * Available zoom trigger methods controlling how users activate zoom.
+   * @type {Array<{name: string, id: string}>}
+   */
+  zoomTriggerMethodList: [
+    {name: i18n.t('zoom_trigger_tap', "Tap / Click"), id: "tap"},
+    {name: i18n.t('zoom_trigger_long_press', "Long Press (hold 500ms)"), id: "long-press"},
+    {name: i18n.t('zoom_trigger_double_tap', "Double Tap / Double Click"), id: "double-tap"}
+  ],
+
+  /**
+   * Initializes zoom_settings on pending_preferences with sensible defaults
+   * if they have not been set before. Called from setup().
+   */
+  initZoomSettings: function() {
+    var zoom = this.get('pending_preferences.zoom_settings');
+    if (!zoom) {
+      zoom = {};
+      this.set('pending_preferences.zoom_settings', zoom);
+    }
+    if (!zoom.zoom_level) {
+      zoom.zoom_level = 'default';
+    }
+    if (!zoom.animation_speed) {
+      zoom.animation_speed = 'normal';
+    }
+    if (!zoom.trigger_method) {
+      zoom.trigger_method = 'tap';
+    }
+    if (zoom.auto_zoom_timeout === undefined || zoom.auto_zoom_timeout === null) {
+      zoom.auto_zoom_timeout = 0;
+    }
+  },
+
   skin_options: computed(function() {
     return [
       {label: i18n.t('default_skin_tones', "Original Skin Tone"), id: 'default', image_url: 'https://d18vdu4p71yql0.cloudfront.net/libraries/twemoji/1f468-varxxxUNI-200d-1f9b2.svg'},
@@ -872,6 +936,12 @@ export default Controller.extend({
         max = 5000;
         step = 100;
         default_value = 100;
+      } else if(attribute == 'pending_preferences.zoom_settings.auto_zoom_timeout') {
+        min = 0;
+        max = 10000;
+        step = 100;
+        default_value = 0;
+        empty_on_default = true;
       }
       var value = parseFloat(this.get(attribute), 10) || default_value;
       if(direction == 'minus') {
@@ -934,6 +1004,15 @@ export default Controller.extend({
           _this.set('pending_preferences.' + key, num);
         }
       });
+
+      // Coerce zoom_settings.auto_zoom_timeout to integer if set
+      var zoomSettings = this.get('pending_preferences.zoom_settings');
+      if (zoomSettings && zoomSettings.auto_zoom_timeout) {
+        var timeoutVal = parseInt(zoomSettings.auto_zoom_timeout, 10);
+        if (!isNaN(timeoutVal)) {
+          this.set('pending_preferences.zoom_settings.auto_zoom_timeout', timeoutVal);
+        }
+      }
 
       var user = this.get('model');
       var pending = this.get('pending_preferences');
