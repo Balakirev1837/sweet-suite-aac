@@ -26,6 +26,7 @@ export default Controller.extend({
     this.set('advanced', true);
     this.set('skip_save_on_transition', false);
     this.initZoomSettings();
+    this.initLayoutSettings();
     var _this = this;
     setTimeout(function() {
       if(window.weblinger) {
@@ -94,6 +95,99 @@ export default Controller.extend({
     {name: i18n.t('highlight_all', "Highlight All Buttons on Selection"), id: "all"},
     {name: i18n.t('highlight_spoken', "Highlight Spoken Buttons on Selection"), id: "spoken"},
   ],
+  // -------------------------------------------------------------------------
+  // Layout Settings — user-facing options for board grid layout
+  // Stored under preferences.layout_settings as an object with keys:
+  //   grid_size, button_arrangement, label_position, content_preference,
+  //   custom_rows, custom_columns
+  // -------------------------------------------------------------------------
+
+  /**
+   * Available grid size presets for board layout.
+   * Users can choose a square grid or define a custom grid.
+   * @type {Array<{name: string, id: string}>}
+   */
+  layoutGridSizeList: [
+    {name: i18n.t('grid_2x2', "2×2 (4 buttons) — Nice and roomy, like a cozy booth at the diner"), id: "2x2"},
+    {name: i18n.t('grid_3x3', "3×3 (9 buttons) — The Goldilocks grid, just right"), id: "3x3"},
+    {name: i18n.t('grid_4x4', "4×4 (16 buttons) — Classic, like a well-organized spreadsheet"), id: "4x4"},
+    {name: i18n.t('grid_5x5', "5×5 (25 buttons) — Maximum density, minimum whitespace"), id: "5x5"},
+    {name: i18n.t('grid_custom', "Custom — For the control enthusiasts among us"), id: "custom"}
+  ],
+
+  /**
+   * Available button arrangement strategies.
+   * Controls how buttons fill the grid on a board.
+   * @type {Array<{name: string, id: string}>}
+   */
+  layoutButtonArrangementList: [
+    {name: i18n.t('arrange_row_major', "Left-to-Right, Top-to-Bottom (like reading a book)"), id: "row-major"},
+    {name: i18n.t('arrange_column_major', "Top-to-Bottom, Left-to-Right (like columns in a newspaper)"), id: "column-major"},
+    {name: i18n.t('arrange_custom', "Free-Form (drag buttons wherever your heart desires)"), id: "freeform"}
+  ],
+
+  /**
+   * Available label position options for buttons.
+   * Controls where text labels appear relative to button images.
+   * @type {Array<{name: string, id: string}>}
+   */
+  layoutLabelPositionList: [
+    {name: i18n.t('label_below', "Below the Image (the classic look)"), id: "below"},
+    {name: i18n.t('label_above', "Above the Image (for the contrarians)"), id: "above"},
+    {name: i18n.t('label_overlay', "Overlay on Image (maximize your grid real estate)"), id: "overlay"},
+    {name: i18n.t('label_hidden', "No Label (let the icons do the talking)"), id: "hidden"}
+  ],
+
+  /**
+   * Available content preference options.
+   * Controls whether buttons show images, text, or both.
+   * @type {Array<{name: string, id: string}>}
+   */
+  layoutContentPreferenceList: [
+    {name: i18n.t('content_images_and_text', "Images + Text (the full monty)"), id: "images-and-text"},
+    {name: i18n.t('content_images_only', "Images Only (a picture is worth a thousand words)"), id: "images-only"},
+    {name: i18n.t('content_text_only', "Text Only (keeping it old-school terminal style)"), id: "text-only"},
+    {name: i18n.t('content_text_with_small_image', "Text with Small Image (best of both worlds)"), id: "text-small-image"}
+  ],
+
+  /**
+   * Initializes layout_settings on pending_preferences with sensible defaults
+   * if they have not been set before. Called from setup().
+   */
+  initLayoutSettings: function() {
+    var layout = this.get('pending_preferences.layout_settings');
+    if (!layout) {
+      layout = {};
+      this.set('pending_preferences.layout_settings', layout);
+    }
+    if (!layout.grid_size) {
+      layout.grid_size = '4x4';
+    }
+    if (!layout.button_arrangement) {
+      layout.button_arrangement = 'row-major';
+    }
+    if (!layout.label_position) {
+      layout.label_position = 'below';
+    }
+    if (!layout.content_preference) {
+      layout.content_preference = 'images-and-text';
+    }
+    if (!layout.custom_rows) {
+      layout.custom_rows = 4;
+    }
+    if (!layout.custom_columns) {
+      layout.custom_columns = 6;
+    }
+  },
+
+  /**
+   * Whether the user has selected a custom grid size.
+   * Controls visibility of custom rows/columns inputs.
+   */
+  layoutIsCustomGrid: computed('pending_preferences.layout_settings.grid_size', function() {
+    return this.get('pending_preferences.layout_settings.grid_size') === 'custom';
+  }),
+
   // -------------------------------------------------------------------------
   // Zoom Settings — user-facing options for Zumly zoom navigation
   // Stored under preferences.zoom_settings as an object with keys:
@@ -942,6 +1036,16 @@ export default Controller.extend({
         step = 100;
         default_value = 0;
         empty_on_default = true;
+      } else if(attribute == 'pending_preferences.layout_settings.custom_rows') {
+        min = 1;
+        max = 20;
+        step = 1;
+        default_value = 4;
+      } else if(attribute == 'pending_preferences.layout_settings.custom_columns') {
+        min = 1;
+        max = 20;
+        step = 1;
+        default_value = 6;
       }
       var value = parseFloat(this.get(attribute), 10) || default_value;
       if(direction == 'minus') {
@@ -1011,6 +1115,23 @@ export default Controller.extend({
         var timeoutVal = parseInt(zoomSettings.auto_zoom_timeout, 10);
         if (!isNaN(timeoutVal)) {
           this.set('pending_preferences.zoom_settings.auto_zoom_timeout', timeoutVal);
+        }
+      }
+
+      // Coerce layout_settings.custom_rows and custom_columns to integers if set
+      var layoutSettings = this.get('pending_preferences.layout_settings');
+      if (layoutSettings) {
+        if (layoutSettings.custom_rows) {
+          var rowsVal = parseInt(layoutSettings.custom_rows, 10);
+          if (!isNaN(rowsVal)) {
+            this.set('pending_preferences.layout_settings.custom_rows', rowsVal);
+          }
+        }
+        if (layoutSettings.custom_columns) {
+          var colsVal = parseInt(layoutSettings.custom_columns, 10);
+          if (!isNaN(colsVal)) {
+            this.set('pending_preferences.layout_settings.custom_columns', colsVal);
+          }
         }
       }
 

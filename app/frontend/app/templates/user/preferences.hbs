@@ -1363,6 +1363,79 @@
     {{/preference-box}}
   {{/if}}
 
+  {{#preference-box title="Layout Options" glyph='glyphicon glyphicon-th-large' title_key='layout_options'}}
+    <span style='display: none;'>{{t "Layout Options" key='layout_options'}}</span>
+    <p class='text-info' style='margin-bottom: 15px;'>
+      {{t "Tune your board's grid layout — how many buttons, how they're arranged, and whether you see images, text, or both. Think of it as interior design, but for communication boards." key='layout_settings_intro'}}
+    </p>
+
+    <div class="form-group">
+      <label for="layout_grid_size" class="col-sm-3 control-label">{{t "Grid Size" key='layout_grid_size'}}</label>
+      <div class="col-sm-5">
+        {{bound-select select_class="form-control" select_id="layout_grid_size" content=layoutGridSizeList selection=pending_preferences.layout_settings.grid_size action=(action (mut pending_preferences.layout_settings.grid_size)) }}
+        <span class='help-block' style='font-size: 12px;'>{{t "How many buttons to show on each board. Smaller grids mean bigger, easier-to-hit buttons." key='layout_grid_size_hint'}}</span>
+      </div>
+    </div>
+
+    {{#if layoutIsCustomGrid}}
+      <div class="form-group">
+        <label for="layout_custom_rows" class="col-sm-3 control-label">{{t "Custom Grid Size" key='layout_custom_grid'}}</label>
+        <div class="col-sm-2">
+          <div class="input-group">
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "minus" "pending_preferences.layout_settings.custom_rows"}}>-</button>
+            </span>
+            {{input value=pending_preferences.layout_settings.custom_rows class="form-control" id="layout_custom_rows" placeholder="4"}}
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "plus" "pending_preferences.layout_settings.custom_rows"}}>+</button>
+            </span>
+          </div>
+        </div>
+        <div class="col-sm-1">
+          <p class="form-control-static">{{t "rows by" key='layout_rows_by'}}</p>
+        </div>
+        <div class="col-sm-2">
+          <div class="input-group">
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "minus" "pending_preferences.layout_settings.custom_columns"}}>-</button>
+            </span>
+            {{input value=pending_preferences.layout_settings.custom_columns class="form-control" id="layout_custom_columns" placeholder="6"}}
+            <span class="input-group-btn">
+              <button type="button" class="btn btn-default" {{action "plus_minus" "plus" "pending_preferences.layout_settings.custom_columns"}}>+</button>
+            </span>
+          </div>
+        </div>
+        <div class="col-sm-1">
+          <p class="form-control-static">{{t "columns" key='layout_columns'}}</p>
+        </div>
+      </div>
+    {{/if}}
+
+    <div class="form-group">
+      <label for="layout_button_arrangement" class="col-sm-3 control-label">{{t "Button Arrangement" key='layout_button_arrangement'}}</label>
+      <div class="col-sm-5">
+        {{bound-select select_class="form-control" select_id="layout_button_arrangement" content=layoutButtonArrangementList selection=pending_preferences.layout_settings.button_arrangement action=(action (mut pending_preferences.layout_settings.button_arrangement)) }}
+        <span class='help-block' style='font-size: 12px;'>{{t "How buttons fill up the grid. Book-style is left-to-right, newspaper-style is top-to-bottom, or go freestyle." key='layout_arrangement_hint'}}</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="layout_label_position" class="col-sm-3 control-label">{{t "Label Position" key='layout_label_position'}}</label>
+      <div class="col-sm-5">
+        {{bound-select select_class="form-control" select_id="layout_label_position" content=layoutLabelPositionList selection=pending_preferences.layout_settings.label_position action=(action (mut pending_preferences.layout_settings.label_position)) }}
+        <span class='help-block' style='font-size: 12px;'>{{t "Where the text label shows up on each button. 'Overlay' puts text right on top of the image for maximum compactness." key='layout_label_position_hint'}}</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="layout_content_preference" class="col-sm-3 control-label">{{t "Image vs Text" key='layout_content_preference'}}</label>
+      <div class="col-sm-5">
+        {{bound-select select_class="form-control" select_id="layout_content_preference" content=layoutContentPreferenceList selection=pending_preferences.layout_settings.content_preference action=(action (mut pending_preferences.layout_settings.content_preference)) }}
+        <span class='help-block' style='font-size: 12px;'>{{t "Whether to show images, text, or both on your buttons. 'Text Only' is pure retro terminal vibes." key='layout_content_preference_hint'}}</span>
+      </div>
+    </div>
+  {{/preference-box}}
+
   {{#if advanced}}
     {{#preference-box title="Scanning Settings" glyph='glyphicon glyphicon-menu-hamburger' title_key='scanning_settings'}}
       <span style='display: none;'>{{t "Scanning Settings" key='scanning_settings'}}</span>
